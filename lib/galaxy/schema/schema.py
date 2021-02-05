@@ -5,6 +5,14 @@ from pydantic import (
     Field,
 )
 
+from galaxy.schema.fields import (
+    EncodedDatabaseIdField,
+    ModelClassField,
+)
+
+USER_MODEL_CLASS_NAME = "User"
+GROUP_MODEL_CLASS_NAME = "Group"
+
 
 class UserModel(BaseModel):
     """User in a transaction context."""
@@ -14,4 +22,19 @@ class UserModel(BaseModel):
     active: bool = Field(title='Active', description='User is active')
     deleted: bool = Field(title='Deleted', description='User is deleted')
     last_password_change: datetime = Field(title='Last password change', description='')
-    model_class: str = Field(title='Model class', description='Database model class (User)')
+    model_class: str = ModelClassField(USER_MODEL_CLASS_NAME)
+
+
+class GroupModel(BaseModel):
+    """User group model"""
+    model_class: str = ModelClassField(GROUP_MODEL_CLASS_NAME)
+    id: EncodedDatabaseIdField = Field(
+        ...,  # Required
+        title='ID',
+        description='Encoded group ID',
+    )
+    name: str = Field(
+        ...,  # Required
+        title="Name",
+        description="The name of the group.",
+    )
