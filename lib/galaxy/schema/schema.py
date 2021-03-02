@@ -16,7 +16,7 @@ GROUP_MODEL_CLASS_NAME = "Group"
 
 class UserModel(BaseModel):
     """User in a transaction context."""
-    id: int = Field(title='ID', description='User ID')
+    id: EncodedDatabaseIdField = Field(title='ID', description='User ID')
     username: str = Field(title='Username', description='User username')
     email: str = Field(title='Email', description='User email')
     active: bool = Field(title='Active', description='User is active')
