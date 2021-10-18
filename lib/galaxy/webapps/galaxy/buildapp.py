@@ -228,6 +228,7 @@ def app_pair(global_conf, load_app_kwds=None, wsgi_preflight=True, **kwargs):
     for th in threading.enumerate():
         if th.is_alive():
             log.debug("Prior to webapp return, Galaxy thread %s is alive.", th)
+    log.debug(f"Total Galaxy threads alive: {threading.active_count()}")
     # Return
     return webapp, app
 
