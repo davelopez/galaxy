@@ -1,3 +1,4 @@
+import gc
 from pathlib import Path
 from typing import cast
 
@@ -120,6 +121,7 @@ def add_galaxy_middleware(app: FastAPI, gx_app):
 
 
 def initialize_fast_app(gx_wsgi_webapp, gx_app):
+    gc.set_debug(gc.DEBUG_LEAK)
     app = FastAPI(
         title="Galaxy API",
         docs_url="/api/docs",
