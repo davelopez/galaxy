@@ -32,7 +32,9 @@ class ImportExportHistoryOutputsToWorkingDirIntegrationTestCase(ImportExportTest
         self._set_up_populators()
 
 
-class ImportExportHistoryViaTasksIntegrationTestCase(ImportExportTests, IntegrationTestCase, UsesCeleryTasks):
+class ImportExportHistoryViaTasksIntegrationTestCase(
+    ImportExportTests, IntegrationTestCase, UsesCeleryTasks, PosixFileSourceSetup
+):
     task_based = True
     framework_tool_and_types = True
 
@@ -68,7 +70,7 @@ class ImportExportHistoryViaTasksIntegrationTestCase(ImportExportTests, Integrat
         history_name = f"for_export_ftp_async_{uuid4()}"
         history_id = self.dataset_populator.setup_history_for_export_testing(history_name)
 
-        model_store_format = "rocrate.zip"
+        model_store_format = "tgz"  # Change to "rocrate.zip" when merging this forward and remove this comment, thanks!
         target_uri = f"gxftp://history.{model_store_format}"
 
         self.dataset_populator.export_history_to_uri_async(history_id, target_uri, model_store_format)
