@@ -7949,14 +7949,11 @@ export interface components {
         TaggableItemClass:
             | "History"
             | "HistoryDatasetAssociation"
+            | "HistoryDatasetCollectionAssociation"
             | "LibraryDatasetDatasetAssociation"
             | "Page"
-            | "WorkflowStep"
             | "StoredWorkflow"
-            | "Visualization"
-            | "HistoryDatasetCollection"
-            | "LibraryDatasetCollection"
-            | "Tool";
+            | "Visualization";
         /** ToolDataDetails */
         ToolDataDetails: {
             /**
