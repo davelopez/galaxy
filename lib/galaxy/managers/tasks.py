@@ -52,6 +52,10 @@ class AsyncTasksManager(metaclass=ABCMeta):
     def get_state(self, task_uuid: UUID) -> TaskState:
         """Returns the current state of the task as a string."""
 
+    @abstractmethod
+    def revoke(self, task_uuid: UUID) -> None:
+        """Revoke a task."""
+
 
 class CeleryAsyncTasksManager(AsyncTasksManager):
     """Thin wrapper around Celery tasks AsyncResult queries."""
@@ -77,3 +81,8 @@ class CeleryAsyncTasksManager(AsyncTasksManager):
 
     def _get_result(self, task_uuid: UUID) -> AsyncResult:
         return AsyncResult(str(task_uuid))
+
+    def revoke(self, task_uuid: UUID) -> None:
+        """Revoke a task."""
+        result = self._get_result(task_uuid)
+        result.revoke()

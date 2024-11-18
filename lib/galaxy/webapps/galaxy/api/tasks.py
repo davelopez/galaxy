@@ -31,3 +31,11 @@ class FastAPITasks:
     )
     def state(self, task_id: UUID) -> TaskState:
         return self.manager.get_state(task_id)
+
+    @router.get(
+        "/api/tasks/{task_id}/revoke",
+        require_admin=True,
+        summary="Revoke task ID",
+    )
+    def revoke(self, task_id: UUID):
+        self.manager.revoke(task_id)
