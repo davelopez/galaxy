@@ -718,6 +718,27 @@ class Registry:
             if possible_extension in self.datatypes_by_extension:
                 return self.datatypes_by_extension[possible_extension]
 
+        for possible_extension in possible_extensions:
+            if not possible_extension.endswith(".crypt4gh"):
+                continue
+            base_extension = possible_extension.removesuffix(".crypt4gh")
+            base_datatype = self.datatypes_by_suffix_inferences.get(base_extension)
+            if base_datatype is None:
+                base_datatype = self.datatypes_by_extension.get(base_extension)
+            if base_datatype is None:
+                continue
+
+            crypt4gh_extension = f"{base_datatype.file_ext}.crypt4gh"
+            if crypt4gh_extension in self.datatypes_by_extension:
+                return self.datatypes_by_extension[crypt4gh_extension]
+
+            try:
+                runtime_datatype = self.get_or_create_crypt4gh_datatype(base_datatype.file_ext)
+            except Exception:
+                runtime_datatype = None
+            if runtime_datatype is not None:
+                return runtime_datatype
+
         return generic_datatype_instance
 
     def is_extension_unsniffable_binary(self, ext):
@@ -1142,7 +1163,8 @@ class Registry:
 
     def to_xml_file(self, path):
         if not self._registry_xml_string:
-            registry_string_template = Template("""<?xml version="1.0"?>
+            registry_string_template = Template(
+                """<?xml version="1.0"?>
             <datatypes>
               <registration converters_path="$converters_path" display_path="$display_path">
                 $datatype_elems
@@ -1151,7 +1173,8 @@ class Registry:
                 $sniffer_elems
               </sniffers>
             </datatypes>
-            """)
+            """
+            )
             converters_path = self.converters_path_attr or ""
             display_path = self.display_path_attr or ""
             datatype_elems = "".join(galaxy.util.xml_to_string(elem) for elem in self.datatype_elems)

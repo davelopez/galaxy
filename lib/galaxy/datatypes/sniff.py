@@ -595,7 +595,10 @@ def _resolve_crypt4gh_extension(registry, ext: Optional[str]) -> Optional[str]:
 
     get_or_create = getattr(registry, "get_or_create_crypt4gh_datatype", None)
     if callable(get_or_create):
-        datatype = get_or_create(ext)
+        try:
+            datatype = get_or_create(ext)
+        except Exception:
+            datatype = None
         if datatype is not None:
             return datatype.file_ext
 
@@ -606,15 +609,14 @@ def _resolve_crypt4gh_extension(registry, ext: Optional[str]) -> Optional[str]:
 
 def _guess_crypt4gh_extension_from_hints(registry, *hints: Optional[str]) -> str:
     for hint in hints:
-        if not hint:
+        if not hint or hint in AUTO_DETECT_EXTENSIONS:
             continue
         inferred_ext = guess_ext_from_file_name(hint, registry)
         crypt4gh_ext = _resolve_crypt4gh_extension(registry, inferred_ext)
         if crypt4gh_ext:
             return crypt4gh_ext
 
-    fallback_ext = _resolve_crypt4gh_extension(registry, "data")
-    return fallback_ext or "binary"
+    return "binary"
 
 
 def guess_ext_for_existing_dataset(
@@ -892,7 +894,11 @@ def handle_compressed_file(
             if compressed_type == "crypt4gh":
                 keep_compressed = True
                 if ext in AUTO_DETECT_EXTENSIONS:
-                    ext = _guess_crypt4gh_extension_from_hints(datatypes_registry)
+                    ext = _guess_crypt4gh_extension_from_hints(
+                        datatypes_registry,
+                        uploaded_file_ext,
+                        os.path.basename(file_prefix.filename),
+                    )
             # attempt to sniff for a keep-compressed datatype (observing the sniff order)
             if not keep_compressed and compressed_type != "crypt4gh":
                 sniff_datatypes = filter(lambda d: getattr(d, "compressed", False), datatypes_registry.sniff_order)
