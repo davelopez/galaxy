@@ -585,6 +585,38 @@ def guess_ext_from_file_name(fname, registry, requested_ext="auto"):
     return registry.get_datatype_from_filename(fname).file_ext
 
 
+def _resolve_crypt4gh_extension(registry, ext: Optional[str]) -> Optional[str]:
+    if not ext or ext in AUTO_DETECT_EXTENSIONS:
+        return None
+
+    if ext.endswith(".crypt4gh"):
+        datatype = registry.get_datatype_by_extension(ext)
+        return datatype.file_ext if datatype else None
+
+    get_or_create = getattr(registry, "get_or_create_crypt4gh_datatype", None)
+    if callable(get_or_create):
+        datatype = get_or_create(ext)
+        if datatype is not None:
+            return datatype.file_ext
+
+    crypt4gh_ext = f"{ext}.crypt4gh"
+    datatype = registry.get_datatype_by_extension(crypt4gh_ext)
+    return datatype.file_ext if datatype else None
+
+
+def _guess_crypt4gh_extension_from_hints(registry, *hints: Optional[str]) -> str:
+    for hint in hints:
+        if not hint:
+            continue
+        inferred_ext = guess_ext_from_file_name(hint, registry)
+        crypt4gh_ext = _resolve_crypt4gh_extension(registry, inferred_ext)
+        if crypt4gh_ext:
+            return crypt4gh_ext
+
+    fallback_ext = _resolve_crypt4gh_extension(registry, "data")
+    return fallback_ext or "binary"
+
+
 def guess_ext_for_existing_dataset(
     path: str,
     registry,
@@ -595,12 +627,7 @@ def guess_ext_for_existing_dataset(
 ) -> str:
     file_prefix = FilePrefix(path, auto_decompress=auto_decompress)
     if file_prefix.compressed_format == "crypt4gh":
-        for hint in (dataset_name, current_extension):
-            if hint:
-                inferred_ext = guess_ext_from_file_name(hint, registry)
-                if inferred_ext.endswith(".crypt4gh"):
-                    return inferred_ext
-        return "binary"
+        return _guess_crypt4gh_extension_from_hints(registry, dataset_name, current_extension)
     return guess_ext(file_prefix, registry.sniff_order, auto_decompress=auto_decompress)
 
 
@@ -858,13 +885,14 @@ def handle_compressed_file(
                     crypt4gh_suffix_chain = file_basename.split(".", 1)[1]
             if compressed_type == "crypt4gh" and crypt4gh_suffix_chain:
                 inferred_ext = datatypes_registry.get_datatype_from_filename(f"x.{crypt4gh_suffix_chain}").file_ext
-                if inferred_ext.endswith(".crypt4gh"):
-                    ext = inferred_ext
+                crypt4gh_ext = _resolve_crypt4gh_extension(datatypes_registry, inferred_ext)
+                if crypt4gh_ext:
+                    ext = crypt4gh_ext
                     keep_compressed = True
             if compressed_type == "crypt4gh":
                 keep_compressed = True
                 if ext in AUTO_DETECT_EXTENSIONS:
-                    ext = "binary"
+                    ext = _guess_crypt4gh_extension_from_hints(datatypes_registry)
             # attempt to sniff for a keep-compressed datatype (observing the sniff order)
             if not keep_compressed and compressed_type != "crypt4gh":
                 sniff_datatypes = filter(lambda d: getattr(d, "compressed", False), datatypes_registry.sniff_order)
@@ -876,8 +904,8 @@ def handle_compressed_file(
             datatype = datatypes_registry.get_datatype_by_extension(ext)
             keep_compressed = getattr(datatype, "compressed", False)
             if compressed_type == "crypt4gh":
-                crypt4gh_ext = f"{ext}.crypt4gh"
-                if crypt4gh_ext in datatypes_registry.datatypes_by_extension:
+                crypt4gh_ext = _resolve_crypt4gh_extension(datatypes_registry, ext)
+                if crypt4gh_ext:
                     ext = crypt4gh_ext
                 keep_compressed = True
     # don't waste time decompressing if we sniff invalid contents
