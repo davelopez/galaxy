@@ -1,21 +1,21 @@
 # Galaxy is configured by default to be usable in a single-user development
 # environment.  To tune the application for a multi-user production
 # environment, see the documentation at:
-# 
+#
 #  https://docs.galaxyproject.org/en/master/admin/production.html
-# 
+#
 # Throughout this sample configuration file, except where stated otherwise,
 # uncommented values override the default if left unset, whereas commented
 # values are set to the default value.  Relative paths are relative to the root
 # Galaxy directory.
-# 
+#
 # Examples of many of these options are explained in more detail in the Galaxy
 # Community Hub.
-# 
+#
 #   https://galaxyproject.org/admin/config
-# 
+#
 # Config hackers are encouraged to check there before asking for help.
-# 
+#
 # Configuration for Gravity process manager.
 # ``uwsgi:`` section will be ignored if Galaxy is started via Gravity commands (e.g ``./run.sh``, ``galaxy`` or ``galaxyctl``).
 gravity:
@@ -980,6 +980,21 @@ galaxy:
   # datatypes_conf.xml file. With this option set to false the
   # compressed datatypes will be unpacked before sniffing.
   #sniff_compressed_dynamic_datatypes_default: true
+
+  # Enable transparent datatype matching for Crypt4GH-wrapped datasets.
+  # When enabled, wrapped datatypes (for example
+  # ``fastqsanger.crypt4gh``) can match tool input formats that accept
+  # their inner datatype, assuming Crypt4GH staging/decryption support
+  # is configured for job execution.
+  #enable_crypt4gh_transparent_staging: false
+
+  # Base URL of the runner-side Crypt4GH re-encryption service.  When
+  # ``enable_crypt4gh_transparent_staging`` is true this service is
+  # called during job pre/post-processing to decrypt inputs and encrypt
+  # outputs.  The service is responsible for all private-key operations;
+  # Galaxy never handles private keys or plaintext payload bytes.
+  # Example: ``http://127.0.0.1:47419``
+  #crypt4gh_reencryption_service_url: null
 
   # Disable the 'Auto-detect' option for file uploads
   #datatypes_disable_auto: false
