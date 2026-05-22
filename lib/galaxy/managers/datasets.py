@@ -47,6 +47,7 @@ from galaxy.schema.tasks import (
     PurgeDatasetsTaskRequest,
 )
 from galaxy.structured_app import MinimalManagerApp
+from galaxy.util.crypt4gh import preserve_crypt4gh_inner_file_ext
 from galaxy.util.hash_util import memory_bound_hexdigest
 
 log = logging.getLogger(__name__)
@@ -561,10 +562,17 @@ class DatasetAssociationManager(
         self.ensure_can_set_metadata(dataset_assoc)
         assert dataset_assoc.dataset
         path = dataset_assoc.dataset.get_file_name()
-        datatype = sniff.guess_ext(path, self.app.datatypes_registry.sniff_order)
+        guessed_datatype = sniff.guess_ext(path, self.app.datatypes_registry.sniff_order)
+        metadata_inner_ext = getattr(getattr(dataset_assoc, "metadata", None), "crypt4gh_inner_ext", None)
+        datatype = preserve_crypt4gh_inner_file_ext(
+            guessed_datatype,
+            current_ext=getattr(dataset_assoc, "extension", None),
+            metadata_inner_ext=metadata_inner_ext,
+        )
         self.app.datatypes_registry.change_datatype(dataset_assoc, datatype)
         session.commit()
-        self.set_metadata(trans, dataset_assoc)
+        self.set_metadata(trans, dataset_assoc, overwrite=True)
+        return datatype
 
     def set_metadata(
         self, trans: ProvidesHistoryContext, dataset_assoc: U, overwrite: bool = False, validate: bool = True

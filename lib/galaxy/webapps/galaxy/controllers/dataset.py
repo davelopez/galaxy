@@ -17,7 +17,6 @@ from galaxy.datatypes.display_applications.util import (
     decode_dataset_user,
     encode_dataset_user,
 )
-from galaxy.datatypes.sniff import guess_ext
 from galaxy.exceptions import (
     InsufficientPermissionsException,
     MessageException,
@@ -383,16 +382,7 @@ class DatasetInterface(BaseUIController, UsesAnnotations, UsesItemRatings, UsesE
                 else:
                     # we can't detect datatype if the dataset is not on disk
                     self.hda_manager.ensure_dataset_on_disk(trans, data)
-                    path = data.dataset.get_file_name()
-                    datatype = guess_ext(path, trans.app.datatypes_registry.sniff_order)
-                    trans.app.datatypes_registry.change_datatype(data, datatype)
-                    trans.sa_session.commit()
-                    job, *_ = trans.app.datatypes_registry.set_external_metadata_tool.tool_action.execute(
-                        trans.app.datatypes_registry.set_external_metadata_tool,
-                        trans,
-                        incoming={"input1": data},
-                    )
-                    trans.app.job_manager.enqueue(job, tool=trans.app.datatypes_registry.set_external_metadata_tool)
+                    datatype = self.hda_manager.detect_datatype(trans, data)
                     message = f"Detection was finished and changed the datatype to {datatype}."
             else:
                 raise MessageException(f'Changing datatype "{data.extension}" is not allowed.')

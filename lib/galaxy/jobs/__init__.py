@@ -48,6 +48,7 @@ from galaxy import (
     util,
 )
 from galaxy.datatypes import sniff
+from galaxy.datatypes.crypt4gh import is_crypt4gh_file_ext
 from galaxy.exceptions import (
     MessageException,
     ObjectInvalid,
@@ -2021,6 +2022,11 @@ class MinimalJobWrapper(HasResourceParameters):
                     working_directory=self.working_directory,
                     remote_metadata_directory=remote_metadata_directory,
                 )
+            if is_crypt4gh_file_ext(dataset.extension):
+                # External metadata for wrapped outputs is gathered while files
+                # are still plaintext. Refresh crypt4gh metadata after post-
+                # command encryption so header metadata reflects final content.
+                dataset.datatype.set_meta(dataset, overwrite=False)
             if final_job_state != job.states.ERROR:
                 line_count = context.get("line_count", None)
                 dataset.set_peek(line_count=line_count)

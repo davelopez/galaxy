@@ -37,6 +37,12 @@ from galaxy.util.checkers import (
     COMPRESSION_CHECK_FUNCTIONS,
     is_tar,
 )
+from galaxy.util.crypt4gh import (
+    check_crypt4gh,
+    CRYPT4GH_SUFFIX,
+    infer_crypt4gh_file_ext,
+    wrap_crypt4gh_file_ext,
+)
 from galaxy.util.path import StrPath
 
 try:
@@ -591,6 +597,8 @@ def guess_ext(fname_or_file_prefix: Union[str, "FilePrefix"], sniff_order, is_bi
 
 
 def guess_ext_from_file_name(fname, registry, requested_ext="auto"):
+    if fname.endswith(CRYPT4GH_SUFFIX):
+        return infer_crypt4gh_file_ext(fname, registry, requested_ext=requested_ext)
     if requested_ext != "auto":
         return requested_ext
     return registry.get_datatype_from_filename(fname).file_ext
@@ -932,8 +940,20 @@ def handle_uploaded_dataset_file_internal(
 
         is_binary = file_prefix.binary
         guessed_ext = ext
-        if ext in AUTO_DETECT_EXTENSIONS:
-            # TODO: skip this if we haven't actually converted the dataset
+        is_crypt4gh_upload = check_crypt4gh(converted_path)
+        if is_crypt4gh_upload:
+            if ext in AUTO_DETECT_EXTENSIONS:
+                # User didn't select a type, infer inner type from filename
+                upload_name = f"x.{uploaded_file_ext}" if uploaded_file_ext else file_prefix.filename
+                guessed_ext = infer_crypt4gh_file_ext(
+                    upload_name,
+                    datatypes_registry,
+                    requested_ext=ext,
+                )
+            else:
+                # User selected a type, wrap it with crypt4gh
+                guessed_ext = wrap_crypt4gh_file_ext(ext)
+        elif ext in AUTO_DETECT_EXTENSIONS:
             guessed_ext = guess_ext(
                 converted_path,
                 sniff_order=datatypes_registry.sniff_order,
@@ -951,7 +971,7 @@ def handle_uploaded_dataset_file_internal(
                     os.unlink(converted_path)
                 assert _converted_path
                 converted_path = _converted_path
-            if ext in AUTO_DETECT_EXTENSIONS:
+            if ext in AUTO_DETECT_EXTENSIONS and not is_crypt4gh_upload:
                 ext = guess_ext(converted_path, sniff_order=datatypes_registry.sniff_order)
         else:
             ext = guessed_ext

@@ -11,7 +11,9 @@ from os.path import (
 )
 
 from galaxy import util
+from galaxy.job_execution.crypt4gh import build_staging_plan
 from galaxy.job_execution.output_collect import default_exit_code_file
+from galaxy.jobs.crypt4gh_commands import inject_crypt4gh_staging_commands
 from galaxy.jobs.runners.util.job_script import (
     INTEGRITY_INJECTION,
     ScriptIntegrityChecks,
@@ -57,8 +59,22 @@ def build_command(
         - commands to set metadata (if include_metadata is True)
     """
     remote_command_params = remote_command_params or {}
+
+    # Crypt4GH output wrapping requires metadata/index generation to run while
+    # outputs are still plaintext (before post-command re-encryption).
+    # Force metadata embedding for these jobs even if the destination default is
+    # to defer metadata collection.
+    force_embed_metadata = False
+    try:
+        crypt4gh_plan = build_staging_plan(job_wrapper, working_directory=job_wrapper.working_directory)
+        force_embed_metadata = crypt4gh_plan.has_crypt4gh_outputs
+    except Exception:
+        log.warning("Failed to inspect crypt4gh staging plan for metadata embedding", exc_info=True)
+
+    include_metadata = include_metadata or force_embed_metadata
+
     shell = job_wrapper.shell
-    base_command_line = job_wrapper.get_command_line()
+    base_command_line = job_wrapper.get_command_line() or ""
     # job_id = job_wrapper.job_id
     # log.debug( 'Tool evaluation for job (%s) produced command-line: %s' % ( job_id, base_command_line ) )
 
@@ -155,6 +171,8 @@ def build_command(
     if include_metadata and job_wrapper.requires_setting_metadata:
         commands_builder.append_command(f"cd '{working_directory}'")
         __handle_metadata(commands_builder, job_wrapper, runner, remote_command_params)
+
+    __handle_crypt4gh_staging(commands_builder, job_wrapper, working_directory)
 
     return commands_builder.build()
 
@@ -361,6 +379,17 @@ tee -a '{stderr_file}' < "$__err" >&2 &""",
         if self.return_code_captured:
             self.append_command(YIELD_CAPTURED_CODE)
         return self.commands
+
+
+def __handle_crypt4gh_staging(commands_builder, job_wrapper, working_directory):
+    """Inject crypt4gh decrypt/encrypt shell fragments when the job has encrypted I/O."""
+    try:
+        job_io = getattr(job_wrapper, "job_io", None)
+        if job_io is None:
+            return
+        inject_crypt4gh_staging_commands(commands_builder, job_wrapper, working_directory)
+    except Exception:
+        log.warning("Failed to inject crypt4gh staging commands", exc_info=True)
 
 
 __all__ = ("build_command",)

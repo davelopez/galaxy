@@ -68,7 +68,7 @@ def handle_upload(
                 tmp_dir=tmp_dir,
                 in_place=in_place,
                 check_content=check_content,
-                uploaded_file_ext=os.path.splitext(name)[1].lower().lstrip("."),
+                uploaded_file_name=name,
                 convert_to_posix_lines=convert_to_posix_lines,
                 convert_spaces_to_tabs=convert_spaces_to_tabs,
             )
