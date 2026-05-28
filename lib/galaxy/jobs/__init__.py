@@ -57,6 +57,10 @@ from galaxy.exceptions import (
 from galaxy.files import ProvidesFileSourcesUserContext
 from galaxy.job_execution.actions.post import ActionBox
 from galaxy.job_execution.compute_environment import SharedComputeEnvironment
+from galaxy.job_execution.crypt4gh import (
+    Crypt4GHExternalServiceUnavailable,
+    raise_if_crypt4gh_staging_external_service_unavailable,
+)
 from galaxy.job_execution.output_collect import (
     collect_extra_files,
     collect_shrinked_content_from_path,
@@ -2146,10 +2150,15 @@ class MinimalJobWrapper(HasResourceParameters):
 
         job_context = ExpressionContext(dict(stdout=tool_stdout, stderr=tool_stderr))
         if extended_metadata:
+            outputs_populated_path = os.path.join(self.working_directory, "metadata", "outputs_populated")
+            try:
+                raise_if_crypt4gh_staging_external_service_unavailable(job.stderr or "", outputs_populated_path)
+            except Crypt4GHExternalServiceUnavailable as e:
+                return fail(str(e), exception=e)
             try:
                 import_options = store.ImportOptions(allow_dataset_object_edit=True, allow_edit=True)
                 import_model_store = store.get_import_model_store_for_directory(
-                    os.path.join(self.working_directory, "metadata", "outputs_populated"),
+                    outputs_populated_path,
                     app=self.app,
                     import_options=import_options,
                     user=job.user,

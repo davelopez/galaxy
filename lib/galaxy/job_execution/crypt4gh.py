@@ -19,17 +19,43 @@ The runner-side key service resolves secrets from its own secure storage.
 import json
 import os
 from dataclasses import (
-    asdict,
     dataclass,
     field,
 )
 from typing import (
     Any,
     Optional,
+    TYPE_CHECKING,
 )
 
 from galaxy.datatypes.crypt4gh import is_crypt4gh_file_ext
+from galaxy.exceptions import MessageException
 from galaxy.job_execution.compute_environment import ComputeEnvironment
+
+if TYPE_CHECKING:
+    from galaxy.jobs import MinimalJobWrapper
+
+
+_STAGE_FAILURE_MARKERS = (
+    "[crypt4gh] stage-inputs failed",
+    "[crypt4gh] stage-outputs failed",
+)
+
+
+class Crypt4GHExternalServiceUnavailable(MessageException):
+    """Raised when crypt4gh staging fails because the external service is unavailable."""
+
+
+def raise_if_crypt4gh_staging_external_service_unavailable(job_stderr: str, outputs_populated_path: str) -> None:
+    """Raise a dedicated exception when crypt4gh staging failed due to external service issues."""
+    if os.path.exists(outputs_populated_path):
+        return
+    if not any(marker in job_stderr for marker in _STAGE_FAILURE_MARKERS):
+        return
+    raise Crypt4GHExternalServiceUnavailable(
+        "Encrypted dataset staging failed because an external service was unavailable. "
+        "Verify the configured crypt4gh re-encryption service is reachable and retry the job."
+    )
 
 
 @dataclass
