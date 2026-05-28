@@ -145,8 +145,9 @@ def _get_owner_email(job) -> str:
 
 
 def build_staging_plan(
-    job_wrapper,
+    job_wrapper: "MinimalJobWrapper",
     working_directory: Optional[str] = None,
+    compute_environment: Optional[ComputeEnvironment] = None,
 ) -> "Crypt4GHStagingPlan":
     """Build a Crypt4GHStagingPlan from a job wrapper's inputs and outputs.
 
@@ -186,7 +187,11 @@ def build_staging_plan(
         ext = _get_dataset_extension(dataset)
         if not is_crypt4gh_file_ext(ext):
             continue
-        encrypted_path = str(job_io.get_input_path(dataset))
+        encrypted_path = None
+        if compute_environment is not None:
+            encrypted_path = compute_environment.input_path_rewrite(dataset)
+        if encrypted_path is None:
+            encrypted_path = str(job_io.get_input_path(dataset))
         dataset_id = _get_dataset_id(dataset)
         inner_ext = _get_inner_ext(dataset)
         staged_name = f"input_{dataset_id}.{inner_ext}"
@@ -208,7 +213,11 @@ def build_staging_plan(
         ext = _get_dataset_extension(dataset)
         if not is_crypt4gh_file_ext(ext):
             continue
-        final_path = str(dataset_path)
+        final_path = None
+        if compute_environment is not None:
+            final_path = compute_environment.output_path_rewrite(dataset)
+        if final_path is None:
+            final_path = str(dataset_path)
         dataset_id = _get_dataset_id(dataset)
         inner_ext = _get_inner_ext(dataset)
         staged_name = f"output_{dataset_id}.{inner_ext}"
@@ -229,17 +238,35 @@ def build_staging_plan(
 
 
 def write_staging_manifest(plan: Crypt4GHStagingPlan) -> None:
-    """Write the non-secret JSON manifest for the runner-side key service.
+    """Write the minimal JSON manifest for the compute-side staging helper.
 
-    The manifest is written to ``plan.manifest_path`` and contains no private
-    keys, passphrases, or decrypted payload bytes.
+    The manifest is written to ``plan.manifest_path`` and contains only the
+    fields needed by the helper to perform file I/O and service calls:
+    - staging_directory: where to write staged files
+    - inputs: encrypted_path, staged_path, owner_email for each input
+    - outputs: staged_path, final_path, owner_email, should_encrypt for each output
+
+    No private keys, passphrases, or decrypted payload bytes are included.
     """
     manifest: dict[str, Any] = {
-        "job_id": plan.job_id,
-        "working_directory": plan.working_directory,
         "staging_directory": plan.staging_directory,
-        "inputs": [asdict(e) for e in plan.input_entries],
-        "outputs": [asdict(e) for e in plan.output_entries],
+        "inputs": [
+            {
+                "encrypted_path": e.encrypted_path,
+                "staged_path": e.staged_path,
+                "owner_email": e.owner_email,
+            }
+            for e in plan.input_entries
+        ],
+        "outputs": [
+            {
+                "staged_path": e.staged_path,
+                "final_path": e.final_path,
+                "owner_email": e.owner_email,
+                "should_encrypt": e.should_encrypt,
+            }
+            for e in plan.output_entries
+        ],
     }
     with open(plan.manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
