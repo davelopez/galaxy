@@ -14,7 +14,10 @@ The re-encryption service URL is read from
 places private keys, passphrases, or decrypted payload bytes in these commands.
 """
 
+import os
 import shlex
+import shutil
+from pathlib import Path
 from typing import (
     Optional,
     TYPE_CHECKING,
@@ -28,9 +31,28 @@ from galaxy.job_execution.crypt4gh import (
 if TYPE_CHECKING:
     from galaxy.job_execution.crypt4gh import Crypt4GHStagingPlan
 
-# curl timeout in seconds for each service call (per-request wall clock limit)
-_STAGE_INPUTS_TIMEOUT = 120
-_STAGE_OUTPUTS_TIMEOUT = 300
+
+_HELPER_SCRIPT_NAME = "crypt4gh_staging_helper.py"
+
+
+def _helper_source_path() -> str:
+    """Return the in-repo source path of the compute-side staging helper."""
+    return str(Path(__file__).resolve().parent.parent / "job_execution" / "crypt4gh_staging.py")
+
+
+def _ensure_helper_script(local_working_directory: str) -> str:
+    """Copy the helper script into the job working directory and return its path."""
+    helper_path = os.path.join(local_working_directory, _HELPER_SCRIPT_NAME)
+    source_path = _helper_source_path()
+    shutil.copyfile(source_path, helper_path)
+    return helper_path
+
+
+def _remote_or_local_path(local_path: str, remote_script_directory: Optional[str]) -> str:
+    """Return remote script-directory path when available, otherwise local path."""
+    if not remote_script_directory:
+        return local_path
+    return os.path.join(remote_script_directory, os.path.basename(local_path))
 
 
 def _get_service_url(job_wrapper) -> Optional[str]:
@@ -41,24 +63,25 @@ def _get_service_url(job_wrapper) -> Optional[str]:
     return None
 
 
-def _curl_service_call(service_url: str, endpoint: str, manifest_path: str, timeout: int) -> str:
-    """Build a shell curl command that POSTs manifest JSON content to an endpoint.
-
-    Fails loudly (non-zero exit, message to stderr) if curl returns a non-2xx
-    status or cannot connect.  Galaxy never passes private keys here.
-    """
-    url = service_url.rstrip("/") + "/" + endpoint.lstrip("/")
-    safe_manifest_arg = shlex.quote("@" + manifest_path)
+def _python_helper_call(operation: str, helper_path: str, manifest_path: str, service_url: str) -> str:
+    """Build a shell command invoking the compute-side staging helper by file path."""
+    # These are relative to the job working directory where the command pipeline runs.
+    tool_stdout_path = "./outputs/tool_stdout"
+    tool_stderr_path = "./outputs/tool_stderr"
     return (
-        f"curl -sf --max-time {timeout} -X POST {shlex.quote(url)}"
-        f' -H "Content-Type: application/json"'
-        f" --data-binary {safe_manifest_arg}"
-        f' || {{ echo "[crypt4gh] {endpoint} failed" >&2; exit 1; }}'
+        f'"$GALAXY_PYTHON" {shlex.quote(helper_path)}'
+        f" {shlex.quote(operation)}"
+        f" {shlex.quote(manifest_path)}"
+        f" {shlex.quote(service_url)}"
+        f" 1>> {shlex.quote(tool_stdout_path)}"
+        f" 2>> {shlex.quote(tool_stderr_path)}"
+        f' || {{ rc=$?; echo "[crypt4gh] {operation} failed (exit $rc)" >> {shlex.quote(tool_stderr_path)}; exit $rc; }}'
     )
 
 
 def build_crypt4gh_pre_commands(
     plan: "Crypt4GHStagingPlan",
+    helper_path: str,
     service_url: Optional[str] = None,
 ) -> Optional[str]:
     """Return the shell pre-command string for crypt4gh input staging.
@@ -79,16 +102,17 @@ def build_crypt4gh_pre_commands(
             "crypt4gh transparent staging is enabled but crypt4gh_reencryption_service_url is not configured."
         )
 
-    curl_cmd = _curl_service_call(service_url, "stage-inputs", manifest_path, _STAGE_INPUTS_TIMEOUT)
+    helper_cmd = _python_helper_call("stage-inputs", helper_path, manifest_path, service_url)
     lines = [
         f"mkdir -p {shlex.quote(staging_dir)}",
-        curl_cmd,
+        helper_cmd,
     ]
     return "; ".join(lines)
 
 
 def build_crypt4gh_post_commands(
     plan: "Crypt4GHStagingPlan",
+    helper_path: str,
     service_url: Optional[str] = None,
 ) -> Optional[str]:
     """Return the shell post-command string for crypt4gh output encryption.
@@ -109,9 +133,9 @@ def build_crypt4gh_post_commands(
             "crypt4gh transparent staging is enabled but crypt4gh_reencryption_service_url is not configured."
         )
 
-    curl_cmd = _curl_service_call(service_url, "stage-outputs", manifest_path, _STAGE_OUTPUTS_TIMEOUT)
+    helper_cmd = _python_helper_call("stage-outputs", helper_path, manifest_path, service_url)
     lines = [
-        curl_cmd,
+        helper_cmd,
         f"rm -rf {shlex.quote(staging_dir)}",
     ]
     return "; ".join(lines)
@@ -120,6 +144,7 @@ def build_crypt4gh_post_commands(
 def inject_crypt4gh_commands(
     commands_builder,
     plan: "Crypt4GHStagingPlan",
+    helper_path: str,
     service_url: Optional[str] = None,
 ) -> None:
     """Inject crypt4gh pre/post commands into a CommandsBuilder.
@@ -136,24 +161,56 @@ def inject_crypt4gh_commands(
         plan: The staging plan describing inputs/outputs for this job.
         service_url: Base URL of the runner-side re-encryption service.
     """
-    pre = build_crypt4gh_pre_commands(plan, service_url=service_url)
+    pre = build_crypt4gh_pre_commands(plan, helper_path=helper_path, service_url=service_url)
     if pre:
         commands_builder.prepend_command(pre)
 
-    post = build_crypt4gh_post_commands(plan, service_url=service_url)
+    post = build_crypt4gh_post_commands(plan, helper_path=helper_path, service_url=service_url)
     if post:
         commands_builder.append_command(post)
 
 
-def inject_crypt4gh_staging_commands(commands_builder, job_wrapper, working_directory: str) -> None:
+def inject_crypt4gh_staging_commands(
+    commands_builder,
+    job_wrapper,
+    local_working_directory: str,
+    remote_working_directory: Optional[str] = None,
+    remote_script_directory: Optional[str] = None,
+    compute_environment=None,
+) -> None:
     """Build a staging plan and inject crypt4gh shell fragments when needed."""
-    plan = build_staging_plan(job_wrapper, working_directory=working_directory)
+    plan_working_directory = remote_working_directory or local_working_directory
+    plan = build_staging_plan(
+        job_wrapper,
+        working_directory=plan_working_directory,
+        compute_environment=compute_environment,
+    )
     if not plan.has_crypt4gh_work:
         return
 
-    write_staging_manifest(plan)
+    local_helper_path = _ensure_helper_script(local_working_directory)
+    local_manifest_path = os.path.join(local_working_directory, os.path.basename(plan.manifest_path))
+    write_plan = type(plan)(
+        job_id=plan.job_id,
+        working_directory=plan.working_directory,
+        staging_directory=plan.staging_directory,
+        manifest_path=local_manifest_path,
+        input_entries=plan.input_entries,
+        output_entries=plan.output_entries,
+    )
+    write_staging_manifest(write_plan)
     service_url = _get_service_url(job_wrapper)
-    inject_crypt4gh_commands(commands_builder, plan, service_url=service_url)
+    helper_path = _remote_or_local_path(local_helper_path, remote_script_directory)
+    manifest_path = _remote_or_local_path(local_manifest_path, remote_script_directory)
+    remote_plan = type(plan)(
+        job_id=plan.job_id,
+        working_directory=plan.working_directory,
+        staging_directory=plan.staging_directory,
+        manifest_path=manifest_path,
+        input_entries=plan.input_entries,
+        output_entries=plan.output_entries,
+    )
+    inject_crypt4gh_commands(commands_builder, remote_plan, helper_path=helper_path, service_url=service_url)
 
 
 __all__ = (

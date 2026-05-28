@@ -459,6 +459,13 @@ class PulsarJobRunner(AsynchronousJobRunner[AsynchronousJobState]):
                 log.debug(f"Registering tool_script for Pulsar transfer [{tool_script}]")
                 job_directory_files.append(tool_script)
                 config_files.append(tool_script)
+            for artifact_name in ("crypt4gh_manifest.json", "crypt4gh_staging_helper.py"):
+                artifact_path = os.path.join(job_wrapper.working_directory, artifact_name)
+                if os.path.exists(artifact_path):
+                    log.debug(f"Registering crypt4gh artifact for Pulsar transfer [{artifact_path}]")
+                    job_directory_files.append(artifact_path)
+                    if artifact_path not in config_files:
+                        config_files.append(artifact_path)
             # Following is job destination environment variables
             env = client.env
             # extend it with tool defined environment variables
@@ -601,6 +608,7 @@ class PulsarJobRunner(AsynchronousJobRunner[AsynchronousJobState]):
                 include_work_dir_outputs=False,
                 remote_command_params=remote_command_params,
                 remote_job_directory=remote_job_directory,
+                compute_environment=compute_environment,
             )
         except UnsupportedPulsarException:
             log.exception("failure running job %d, unsupported Pulsar target", job_wrapper.job_id)

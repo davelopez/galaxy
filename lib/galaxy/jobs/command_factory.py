@@ -47,6 +47,7 @@ def build_command(
     create_tool_working_directory: bool = True,
     remote_command_params=None,
     remote_job_directory=None,
+    compute_environment=None,
     stream_stdout_stderr: bool = False,
 ):
     """
@@ -172,7 +173,14 @@ def build_command(
         commands_builder.append_command(f"cd '{working_directory}'")
         __handle_metadata(commands_builder, job_wrapper, runner, remote_command_params)
 
-    __handle_crypt4gh_staging(commands_builder, job_wrapper, working_directory)
+    __handle_crypt4gh_staging(
+        commands_builder,
+        job_wrapper,
+        local_working_directory=job_wrapper.working_directory,
+        remote_working_directory=remote_job_directory,
+        remote_script_directory=remote_command_params.get("script_directory"),
+        compute_environment=compute_environment,
+    )
 
     return commands_builder.build()
 
@@ -381,13 +389,27 @@ tee -a '{stderr_file}' < "$__err" >&2 &""",
         return self.commands
 
 
-def __handle_crypt4gh_staging(commands_builder, job_wrapper, working_directory):
+def __handle_crypt4gh_staging(
+    commands_builder,
+    job_wrapper,
+    local_working_directory,
+    remote_working_directory=None,
+    remote_script_directory=None,
+    compute_environment=None,
+):
     """Inject crypt4gh decrypt/encrypt shell fragments when the job has encrypted I/O."""
     try:
         job_io = getattr(job_wrapper, "job_io", None)
         if job_io is None:
             return
-        inject_crypt4gh_staging_commands(commands_builder, job_wrapper, working_directory)
+        inject_crypt4gh_staging_commands(
+            commands_builder,
+            job_wrapper,
+            local_working_directory=local_working_directory,
+            remote_working_directory=remote_working_directory,
+            remote_script_directory=remote_script_directory,
+            compute_environment=compute_environment,
+        )
     except Exception:
         log.warning("Failed to inject crypt4gh staging commands", exc_info=True)
 
