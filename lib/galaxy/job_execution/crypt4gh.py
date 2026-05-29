@@ -22,6 +22,7 @@ from dataclasses import (
     dataclass,
     field,
 )
+from logging import getLogger
 from typing import (
     Any,
     Optional,
@@ -31,10 +32,16 @@ from typing import (
 from galaxy.datatypes.crypt4gh import is_crypt4gh_file_ext
 from galaxy.exceptions import MessageException
 from galaxy.job_execution.compute_environment import ComputeEnvironment
+from galaxy.util.crypt4gh import (
+    check_crypt4gh,
+    wrap_crypt4gh_file_ext,
+)
 
 if TYPE_CHECKING:
     from galaxy.jobs import MinimalJobWrapper
 
+
+log = getLogger(__name__)
 
 _STAGE_FAILURE_MARKERS = (
     "[crypt4gh] stage-inputs failed",
@@ -118,6 +125,11 @@ class Crypt4GHStagingPlan:
             if entry.dataset_id == dataset_id and entry.should_encrypt:
                 return entry.staged_path
         return None
+
+    @property
+    def encrypted_output_staged_paths(self) -> dict[int, str]:
+        """Map dataset_id → staged_path for every output marked should_encrypt."""
+        return {e.dataset_id: e.staged_path for e in self.output_entries if e.should_encrypt}
 
 
 def _get_dataset_id(dataset) -> int:
@@ -237,15 +249,32 @@ def build_staging_plan(
     # ── Outputs ─────────────────────────────────────────────────────────────
     for _output_name, (dataset, dataset_path) in job_io.get_output_hdas_and_fnames().items():
         ext = _get_dataset_extension(dataset)
-        if not is_crypt4gh_file_ext(ext):
+        output_requires_crypt4gh = is_crypt4gh_file_ext(ext) or plan.has_crypt4gh_inputs
+        if not output_requires_crypt4gh:
             continue
         final_path = None
         if compute_environment is not None:
             final_path = compute_environment.output_path_rewrite(dataset)
+
+        # If runner rewriting points to a temporary false path, stage-outputs
+        # must encrypt into the persisted real object-store path.
+        dataset_false_path = getattr(dataset_path, "false_path", None)
+        dataset_real_path = getattr(dataset_path, "real_path", None)
+        if (
+            final_path is not None
+            and dataset_false_path
+            and dataset_real_path
+            and str(final_path) == str(dataset_false_path)
+        ):
+            final_path = str(dataset_real_path)
+
         if final_path is None:
-            final_path = str(dataset_path)
+            if dataset_real_path:
+                final_path = str(dataset_real_path)
+            else:
+                final_path = str(dataset_path)
         dataset_id = _get_dataset_id(dataset)
-        inner_ext = _get_inner_ext(dataset)
+        inner_ext = _get_inner_ext(dataset) if is_crypt4gh_file_ext(ext) else ext
         staged_name = f"output_{dataset_id}.{inner_ext}"
         staged_path = os.path.join(staging_directory, staged_name)
         plan.output_entries.append(
@@ -296,6 +325,119 @@ def write_staging_manifest(plan: Crypt4GHStagingPlan) -> None:
     }
     with open(plan.manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
+
+
+def rewrite_metadata_output_fnames_for_crypt4gh(
+    job_wrapper: "MinimalJobWrapper", output_fnames, remote_working_directory=None
+):
+    """Rewrite metadata filename overrides to staged plaintext paths for crypt4gh outputs.
+
+    When a job produces crypt4gh-encrypted outputs, the metadata computation
+    must run against the *staged plaintext* files (before post-command
+    re-encryption).  This function replaces each output
+    :class:`~galaxy.job_execution.datasets.DatasetPath` whose dataset is
+    marked for encryption with a clone pointing at the staged path, so that
+    the metadata command reads decrypted content instead of encrypted bytes.
+
+    Returns the original list unchanged when no crypt4gh outputs are present.
+    """
+    try:
+        plan = build_staging_plan(job_wrapper, working_directory=remote_working_directory)
+    except Exception:
+        log.debug("Unable to build crypt4gh staging plan for metadata output rewrite", exc_info=True)
+        return output_fnames
+
+    if not plan.has_crypt4gh_outputs:
+        return output_fnames
+
+    staged_by_dataset_id = plan.encrypted_output_staged_paths
+    if not staged_by_dataset_id:
+        return output_fnames
+
+    rewritten = []
+    changed = False
+    for dataset_path in output_fnames:
+        dataset_id = getattr(dataset_path, "dataset_id", None)
+        staged_path = staged_by_dataset_id.get(dataset_id) if isinstance(dataset_id, int) else None
+        if staged_path and hasattr(dataset_path, "with_path_for_job"):
+            rewritten.append(
+                dataset_path.with_path_for_job(
+                    staged_path,
+                    false_extra_files_path=getattr(dataset_path, "false_extra_files_path", None),
+                    false_metadata_path=getattr(dataset_path, "false_metadata_path", None),
+                )
+            )
+            changed = True
+        else:
+            rewritten.append(dataset_path)
+
+    return rewritten if changed else output_fnames
+
+
+def wrap_compute_environment_for_tool_evaluation(
+    job_wrapper: Any, compute_environment: ComputeEnvironment
+) -> ComputeEnvironment:
+    """Wrap compute environment to expose staged plaintext paths to tool evaluation.
+
+    This wrapper should only be used when building tool command-line parameter
+    paths. Runner-side staging command generation should continue using the
+    original compute environment so encrypted input and final output paths are
+    preserved in the manifest.
+    """
+    plan = build_staging_plan(job_wrapper, compute_environment=compute_environment)
+    if not plan.has_crypt4gh_work:
+        return compute_environment
+    return Crypt4GHComputeEnvironment(compute_environment, plan)
+
+
+def encrypted_output_paths_from_manifest(working_directory: str) -> set[str]:
+    """Return real output paths expected to be encrypted for a job workdir."""
+    output_paths: set[str] = set()
+    manifest_path = os.path.join(working_directory, "crypt4gh_manifest.json")
+    if not os.path.exists(manifest_path):
+        return output_paths
+    try:
+        with open(manifest_path) as handle:
+            manifest = json.load(handle)
+        for output_entry in manifest.get("outputs", []):
+            if not output_entry.get("should_encrypt", True):
+                continue
+            final_path = output_entry.get("final_path")
+            if isinstance(final_path, str) and final_path:
+                output_paths.add(os.path.realpath(final_path))
+    except Exception:
+        # Manifest parsing should not fail job finalization.
+        return set()
+    return output_paths
+
+
+def wrap_output_dataset_if_crypt4gh(dataset, expected_output_paths: set[str]) -> bool:
+    """Wrap extension and refresh metadata/peek when output is encrypted."""
+    if dataset.dataset is None or dataset.dataset.purged:
+        return False
+    dataset_file_name = dataset.dataset.get_file_name()
+    payload_is_crypt4gh = check_crypt4gh(dataset_file_name)
+    expected_crypt4gh_output = os.path.realpath(dataset_file_name) in expected_output_paths
+    if not (payload_is_crypt4gh or expected_crypt4gh_output):
+        return False
+    if not is_crypt4gh_file_ext(dataset.extension):
+        dataset.extension = wrap_crypt4gh_file_ext(dataset.extension)
+        dataset.init_meta()
+    dataset.datatype.set_meta(dataset, overwrite=False)
+    dataset.set_peek()
+    return True
+
+
+def enforce_crypt4gh_output_wrapping(output_dataset_associations, working_directory: str, sa_session) -> None:
+    """Ensure encrypted outputs are represented as crypt4gh-wrapped datasets."""
+    expected_output_paths = encrypted_output_paths_from_manifest(working_directory)
+    for dataset_assoc in output_dataset_associations:
+        dataset_links = (
+            dataset_assoc.dataset.dataset.history_associations + dataset_assoc.dataset.dataset.library_associations
+        )
+        for dataset in dataset_links:
+            if wrap_output_dataset_if_crypt4gh(dataset, expected_output_paths):
+                sa_session.add(dataset)
 
 
 class Crypt4GHComputeEnvironment(ComputeEnvironment):
@@ -383,9 +525,16 @@ class Crypt4GHComputeEnvironment(ComputeEnvironment):
 
 __all__ = (
     "build_staging_plan",
+    "Crypt4GHExternalServiceUnavailable",
     "Crypt4GHComputeEnvironment",
     "Crypt4GHInputEntry",
     "Crypt4GHOutputEntry",
     "Crypt4GHStagingPlan",
+    "enforce_crypt4gh_output_wrapping",
+    "encrypted_output_paths_from_manifest",
+    "raise_if_crypt4gh_staging_external_service_unavailable",
+    "rewrite_metadata_output_fnames_for_crypt4gh",
+    "wrap_output_dataset_if_crypt4gh",
+    "wrap_compute_environment_for_tool_evaluation",
     "write_staging_manifest",
 )

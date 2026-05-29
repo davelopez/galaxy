@@ -5,12 +5,14 @@ import tempfile
 import traceback
 from collections.abc import Callable
 from typing import (
+    cast,
     NamedTuple,
 )
 
 from galaxy.datatypes.registry import Registry
 from galaxy.files import ConfiguredFileSources
 from galaxy.job_execution.compute_environment import SharedComputeEnvironment
+from galaxy.job_execution.crypt4gh import wrap_compute_environment_for_tool_evaluation
 from galaxy.job_execution.setup import JobIO
 from galaxy.managers.dbkeys import GenomeBuilds
 from galaxy.metadata.set_metadata import (
@@ -76,6 +78,17 @@ class ToolApp(MinimalToolApp):
         return self._tool_data_tables
 
 
+class _RemoteEvalJobWrapperShim:
+    """Minimal wrapper interface required by crypt4gh compute-env wrapping."""
+
+    def __init__(self, job_io: JobIO, working_directory: str):
+        self.job_io = job_io
+        self.working_directory = working_directory
+
+    def get_job(self):
+        return self.job_io.job
+
+
 def main(TMPDIR, WORKING_DIRECTORY, IMPORT_STORE_DIRECTORY) -> None:
     metadata_params = get_metadata_params(WORKING_DIRECTORY)
     datatypes_config = metadata_params["datatypes_config"]
@@ -117,7 +130,12 @@ def main(TMPDIR, WORKING_DIRECTORY, IMPORT_STORE_DIRECTORY) -> None:
     tool_evaluator = evaluation.RemoteToolEvaluator(
         app=app, tool=tool, job=job_io.job, local_working_directory=WORKING_DIRECTORY
     )
-    tool_evaluator.set_compute_environment(compute_environment=SharedComputeEnvironment(job_io=job_io, job=job_io.job))
+    shared_compute_environment = SharedComputeEnvironment(job_io=job_io, job=job_io.job)
+    job_wrapper_shim = _RemoteEvalJobWrapperShim(job_io=job_io, working_directory=WORKING_DIRECTORY)
+    compute_environment = wrap_compute_environment_for_tool_evaluation(
+        cast(object, job_wrapper_shim), shared_compute_environment
+    )
+    tool_evaluator.set_compute_environment(compute_environment=compute_environment)
     with open(os.path.join(WORKING_DIRECTORY, "tool_script.sh"), "a") as out:
         command_line, version_command_line, extra_filenames, environment_variables, *_ = tool_evaluator.build()
         out.write(f"{version_command_line or ''}{command_line}")

@@ -1249,6 +1249,21 @@
 :Type: str
 
 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``crypt4gh_compute_private_key_path``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:Description:
+    Worker-local path to the compute private key used for transparent
+    Crypt4GH plaintext input staging. This value is exported to job
+    staging helpers via ``GALAXY_CRYPT4GH_COMPUTE_PRIVATE_KEY``. The
+    path must be valid on the compute node (including Pulsar workers),
+    and key material should be provisioned and permissioned
+    out-of-band.
+:Default: ``None``
+:Type: str
+
+
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 ``datatypes_disable_auto``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

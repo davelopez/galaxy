@@ -59,7 +59,11 @@ from galaxy.job_execution.actions.post import ActionBox
 from galaxy.job_execution.compute_environment import SharedComputeEnvironment
 from galaxy.job_execution.crypt4gh import (
     Crypt4GHExternalServiceUnavailable,
+    encrypted_output_paths_from_manifest,
+    enforce_crypt4gh_output_wrapping,
     raise_if_crypt4gh_staging_external_service_unavailable,
+    wrap_compute_environment_for_tool_evaluation,
+    wrap_output_dataset_if_crypt4gh,
 )
 from galaxy.job_execution.output_collect import (
     collect_extra_files,
@@ -1279,7 +1283,8 @@ class MinimalJobWrapper(HasResourceParameters):
 
         tool_evaluator = self._get_tool_evaluator(job)
         compute_environment = compute_environment or self.default_compute_environment(job)
-        tool_evaluator.set_compute_environment(compute_environment, get_special=get_special)
+        tool_evaluator_compute_environment = wrap_compute_environment_for_tool_evaluation(self, compute_environment)
+        tool_evaluator.set_compute_environment(tool_evaluator_compute_environment, get_special=get_special)
         (
             self.command_line,
             self.version_command_line,
@@ -2007,15 +2012,22 @@ class MinimalJobWrapper(HasResourceParameters):
                 if self.tool.tool_type == "expression":
                     dataset.set_metadata_success_state()
                 elif retry_internally:
-                    # If Galaxy was expected to sniff type and didn't - do so.
-                    if dataset.ext == "_sniff_":
-                        extension = sniff.handle_uploaded_dataset_file(
-                            dataset.dataset.get_file_name(), self.app.datatypes_registry
+                    if is_crypt4gh_file_ext(dataset.extension):
+                        log.warning(
+                            "Skipping internal metadata retry for crypt4gh output dataset [%s] because file content "
+                            "is encrypted at this stage; relying on embedded metadata and crypt4gh header refresh.",
+                            dataset.dataset.id,
                         )
-                        dataset.extension = extension
+                    else:
+                        # If Galaxy was expected to sniff type and didn't - do so.
+                        if dataset.ext == "_sniff_":
+                            extension = sniff.handle_uploaded_dataset_file(
+                                dataset.dataset.get_file_name(), self.app.datatypes_registry
+                            )
+                            dataset.extension = extension
 
-                    # call datatype.set_meta directly for the initial set_meta call during dataset creation
-                    dataset.datatype.set_meta(dataset, overwrite=False)
+                        # call datatype.set_meta directly for the initial set_meta call during dataset creation
+                        dataset.datatype.set_meta(dataset, overwrite=False)
                 else:
                     dataset.state = model.HistoryDatasetAssociation.states.FAILED_METADATA
             else:
@@ -2026,11 +2038,8 @@ class MinimalJobWrapper(HasResourceParameters):
                     working_directory=self.working_directory,
                     remote_metadata_directory=remote_metadata_directory,
                 )
-            if is_crypt4gh_file_ext(dataset.extension):
-                # External metadata for wrapped outputs is gathered while files
-                # are still plaintext. Refresh crypt4gh metadata after post-
-                # command encryption so header metadata reflects final content.
-                dataset.datatype.set_meta(dataset, overwrite=False)
+            expected_output_paths = encrypted_output_paths_from_manifest(self.working_directory)
+            wrap_output_dataset_if_crypt4gh(dataset, expected_output_paths)
             if final_job_state != job.states.ERROR:
                 line_count = context.get("line_count", None)
                 dataset.set_peek(line_count=line_count)
@@ -2224,6 +2233,11 @@ class MinimalJobWrapper(HasResourceParameters):
                 ):
                     # We don't set datsets in error state to OK because discover_outputs may have already set the state to error
                     dataset_assoc.dataset.dataset.state = Dataset.states.OK
+
+        # Ensure encrypted payload outputs are consistently represented as
+        # crypt4gh-wrapped datasets even when metadata_strategy=extended,
+        # where _finish_dataset is not invoked per output association.
+        enforce_crypt4gh_output_wrapping(output_dataset_associations, self.working_directory, self.sa_session)
 
         if job.states.ERROR == final_job_state:
             for dataset_assoc in output_dataset_associations:

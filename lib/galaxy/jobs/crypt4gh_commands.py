@@ -63,13 +63,30 @@ def _get_service_url(job_wrapper) -> Optional[str]:
     return None
 
 
-def _python_helper_call(operation: str, helper_path: str, manifest_path: str, service_url: str) -> str:
+def _get_compute_private_key_path(job_wrapper) -> Optional[str]:
+    """Return optional compute-private-key path for worker-side plaintext staging."""
+    config = getattr(getattr(job_wrapper, "app", None), "config", None)
+    if config is not None:
+        return getattr(config, "crypt4gh_compute_private_key_path", None)
+    return None
+
+
+def _python_helper_call(
+    operation: str,
+    helper_path: str,
+    manifest_path: str,
+    service_url: str,
+    compute_private_key_path: Optional[str] = None,
+) -> str:
     """Build a shell command invoking the compute-side staging helper by file path."""
     # These are relative to the job working directory where the command pipeline runs.
     tool_stdout_path = "./outputs/tool_stdout"
     tool_stderr_path = "./outputs/tool_stderr"
+    key_env = ""
+    if compute_private_key_path:
+        key_env = f"GALAXY_CRYPT4GH_COMPUTE_PRIVATE_KEY={shlex.quote(compute_private_key_path)} "
     return (
-        f'"$GALAXY_PYTHON" {shlex.quote(helper_path)}'
+        f'{key_env}"$GALAXY_PYTHON" {shlex.quote(helper_path)}'
         f" {shlex.quote(operation)}"
         f" {shlex.quote(manifest_path)}"
         f" {shlex.quote(service_url)}"
@@ -83,6 +100,7 @@ def build_crypt4gh_pre_commands(
     plan: "Crypt4GHStagingPlan",
     helper_path: str,
     service_url: Optional[str] = None,
+    compute_private_key_path: Optional[str] = None,
 ) -> Optional[str]:
     """Return the shell pre-command string for crypt4gh input staging.
 
@@ -102,7 +120,13 @@ def build_crypt4gh_pre_commands(
             "crypt4gh transparent staging is enabled but crypt4gh_reencryption_service_url is not configured."
         )
 
-    helper_cmd = _python_helper_call("stage-inputs", helper_path, manifest_path, service_url)
+    helper_cmd = _python_helper_call(
+        "stage-inputs",
+        helper_path,
+        manifest_path,
+        service_url,
+        compute_private_key_path=compute_private_key_path,
+    )
     lines = [
         f"mkdir -p {shlex.quote(staging_dir)}",
         helper_cmd,
@@ -146,6 +170,7 @@ def inject_crypt4gh_commands(
     plan: "Crypt4GHStagingPlan",
     helper_path: str,
     service_url: Optional[str] = None,
+    compute_private_key_path: Optional[str] = None,
 ) -> None:
     """Inject crypt4gh pre/post commands into a CommandsBuilder.
 
@@ -161,7 +186,12 @@ def inject_crypt4gh_commands(
         plan: The staging plan describing inputs/outputs for this job.
         service_url: Base URL of the runner-side re-encryption service.
     """
-    pre = build_crypt4gh_pre_commands(plan, helper_path=helper_path, service_url=service_url)
+    pre = build_crypt4gh_pre_commands(
+        plan,
+        helper_path=helper_path,
+        service_url=service_url,
+        compute_private_key_path=compute_private_key_path,
+    )
     if pre:
         commands_builder.prepend_command(pre)
 
@@ -200,6 +230,7 @@ def inject_crypt4gh_staging_commands(
     )
     write_staging_manifest(write_plan)
     service_url = _get_service_url(job_wrapper)
+    compute_private_key_path = _get_compute_private_key_path(job_wrapper)
     helper_path = _remote_or_local_path(local_helper_path, remote_script_directory)
     manifest_path = _remote_or_local_path(local_manifest_path, remote_script_directory)
     remote_plan = type(plan)(
@@ -210,7 +241,13 @@ def inject_crypt4gh_staging_commands(
         input_entries=plan.input_entries,
         output_entries=plan.output_entries,
     )
-    inject_crypt4gh_commands(commands_builder, remote_plan, helper_path=helper_path, service_url=service_url)
+    inject_crypt4gh_commands(
+        commands_builder,
+        remote_plan,
+        helper_path=helper_path,
+        service_url=service_url,
+        compute_private_key_path=compute_private_key_path,
+    )
 
 
 __all__ = (

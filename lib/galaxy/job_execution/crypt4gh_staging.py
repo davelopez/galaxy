@@ -25,6 +25,7 @@ from urllib import (
 )
 
 import crypt4gh.header
+import crypt4gh.keys
 import crypt4gh.lib
 import nacl.public
 
@@ -78,6 +79,37 @@ def _http_post_json(url: str, payload: dict[str, Any], timeout: int = 30) -> dic
     return json.loads(body)
 
 
+def _load_compute_private_key() -> bytes:
+    """Load compute private key bytes from worker environment configuration."""
+    key_path = os.environ.get("GALAXY_CRYPT4GH_COMPUTE_PRIVATE_KEY")
+    if not key_path:
+        raise RuntimeError(
+            "GALAXY_CRYPT4GH_COMPUTE_PRIVATE_KEY is not configured. "
+            "Transparent Crypt4GH staging requires a worker-accessible compute private key path."
+        )
+    if not os.path.exists(key_path):
+        raise RuntimeError(
+            f"Compute private key path does not exist: {key_path}. "
+            "Set GALAXY_CRYPT4GH_COMPUTE_PRIVATE_KEY to a valid worker-local key file."
+        )
+    try:
+        return crypt4gh.keys.get_private_key(key_path, lambda: b"")
+    except Exception as exc:
+        raise RuntimeError(f"Failed to load compute private key from {key_path}: {exc}") from exc
+
+
+def _decrypt_staged_input_in_place(staged_path: str, compute_private_key: bytes) -> None:
+    """Decrypt a staged crypt4gh file to plaintext at the same staged path."""
+    plaintext_tmp = f"{staged_path}.plaintext.tmp"
+    with open(staged_path, "rb") as infile, open(plaintext_tmp, "wb") as outfile:
+        crypt4gh.lib.decrypt(
+            keys=[(0, compute_private_key, None)],
+            infile=infile,
+            outfile=outfile,
+        )
+    os.replace(plaintext_tmp, staged_path)
+
+
 def _rewrap_header(service_url: str, endpoint: str, header_bytes: bytes, user_email: str) -> bytes:
     """Call the re-encryptor to rewrap a header (base64 in/out)."""
     url = service_url.rstrip("/") + "/" + endpoint.lstrip("/")
@@ -107,7 +139,13 @@ def stage_inputs(manifest_path: str, service_url: str) -> None:
     staging_dir = manifest.get("staging_directory", "")
     os.makedirs(staging_dir, exist_ok=True)
 
-    for entry in manifest.get("inputs", []):
+    input_entries = manifest.get("inputs", [])
+    if not input_entries:
+        return
+
+    compute_private_key = _load_compute_private_key()
+
+    for entry in input_entries:
         encrypted_path = entry["encrypted_path"]
         staged_path = entry["staged_path"]
         user_email = entry.get("owner_email", "")
@@ -123,6 +161,8 @@ def stage_inputs(manifest_path: str, service_url: str) -> None:
             with open(staged_path, "wb") as dst:
                 dst.write(new_header)
                 shutil.copyfileobj(src, dst)
+
+        _decrypt_staged_input_in_place(staged_path, compute_private_key)
 
 
 def _encrypt_for_compute(plaintext_path: str, compute_public_key: bytes) -> bytes:

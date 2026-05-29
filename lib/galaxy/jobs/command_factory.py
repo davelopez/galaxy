@@ -11,7 +11,10 @@ from os.path import (
 )
 
 from galaxy import util
-from galaxy.job_execution.crypt4gh import build_staging_plan
+from galaxy.job_execution.crypt4gh import (
+    build_staging_plan,
+    rewrite_metadata_output_fnames_for_crypt4gh,
+)
 from galaxy.job_execution.output_collect import default_exit_code_file
 from galaxy.jobs.crypt4gh_commands import inject_crypt4gh_staging_commands
 from galaxy.jobs.runners.util.job_script import (
@@ -282,6 +285,11 @@ def __handle_metadata(
     tmp_dir = metadata_kwds.get("tmp_dir", job_wrapper.working_directory)
     dataset_files_path = metadata_kwds.get("dataset_files_path", Dataset.file_path)
     output_fnames = metadata_kwds.get("output_fnames", job_wrapper.job_io.get_output_fnames())
+    output_fnames = rewrite_metadata_output_fnames_for_crypt4gh(
+        job_wrapper,
+        output_fnames,
+        remote_working_directory=remote_command_params.get("script_directory"),
+    )
     config_root = metadata_kwds.get("config_root", None)
     config_file = metadata_kwds.get("config_file", None)
     datatypes_config = metadata_kwds.get("datatypes_config", None)
