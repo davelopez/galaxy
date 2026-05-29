@@ -281,7 +281,7 @@ class TestCrypt4GHE2ETransparentStaging(Crypt4GHServiceMixin, integration_util.I
 
         raw_response = self.galaxy_interactor.get(f"datasets/{dataset_id}/display")
         assert raw_response.status_code == 200
-        assert raw_response.content[:8] == CRYPT4GH_MAGIC, "BAM output was not crypt4gh-encrypted"
+        assert raw_response.content[:8] == CRYPT4GH_MAGIC, f"Dataset {dataset_id} output was not crypt4gh-encrypted"
         return dataset_details
 
     def _wait_for_job_ok(self, job_id: str) -> dict:
