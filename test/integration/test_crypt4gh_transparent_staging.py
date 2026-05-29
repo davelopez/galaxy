@@ -138,8 +138,14 @@ class Crypt4GHServiceMixin:
     def _start_crypt4gh_service(cls, prefix: str = "crypt4gh_test_") -> None:
         """Create the temp directory, initialize, and start the service.
 
+        If the environment variable ``CRYPT4GH_REENCRYPTOR_URL`` is set the
+        method assumes an external service is already running at that URL and
+        skips subprocess creation entirely (useful when debugging tests).
+
         On failure the temporary directory is cleaned up so nothing leaks.
         """
+        if os.environ.get("CRYPT4GH_REENCRYPTOR_URL"):
+            return
         tmp = Path(tempfile.mkdtemp(prefix=prefix))
         try:
             mgr = Crypt4GHServiceMockManager(tmp, GALAXY_REPO_DIR)
@@ -154,7 +160,12 @@ class Crypt4GHServiceMixin:
 
     @classmethod
     def _stop_crypt4gh_service(cls) -> None:
-        """Stop the service and remove the temporary directory."""
+        """Stop the service and remove the temporary directory.
+
+        No-op when ``CRYPT4GH_REENCRYPTOR_URL`` is set (external service).
+        """
+        if os.environ.get("CRYPT4GH_REENCRYPTOR_URL"):
+            return
         if cls.service_manager:
             cls.service_manager.stop()
             cls.service_manager = None
@@ -179,7 +190,7 @@ class TestCrypt4GHE2ETransparentStaging(Crypt4GHServiceMixin, integration_util.I
     def handle_galaxy_config_kwds(cls, config):
         super().handle_galaxy_config_kwds(config)
         config["enable_crypt4gh_transparent_staging"] = True
-        config["crypt4gh_reencryption_service_url"] = REENCRYPTOR_BASE_URL
+        config["crypt4gh_reencryption_service_url"] = os.environ.get("CRYPT4GH_REENCRYPTOR_URL", REENCRYPTOR_BASE_URL)
 
     @classmethod
     def setUpClass(cls):
@@ -202,9 +213,47 @@ class TestCrypt4GHE2ETransparentStaging(Crypt4GHServiceMixin, integration_util.I
         encrypted_dir = Path(tempfile.mkdtemp(prefix="crypt4gh_encrypt_"))
         encrypted_path = encrypted_dir / f"{plaintext_path.name}.crypt4gh"
 
-        assert self.service_manager is not None
-        self.service_manager.encrypt_dataset(plaintext_path, encrypted_path)
+        if self.service_manager is not None:
+            self.service_manager.encrypt_dataset(plaintext_path, encrypted_path)
+        else:
+            # External-service debug mode: encrypt in-process (no subprocess) using
+            # the key material from CRYPT4GH_SERVICE_DIR.
+            service_dir = os.environ.get("CRYPT4GH_SERVICE_DIR")
+            if not service_dir:
+                raise RuntimeError(
+                    "CRYPT4GH_REENCRYPTOR_URL is set but CRYPT4GH_SERVICE_DIR is not. "
+                    "Set CRYPT4GH_SERVICE_DIR to the directory where the external service "
+                    "was initialised so its key material can be used for test-data encryption."
+                )
+            self._encrypt_file_inprocess(plaintext_path, encrypted_path, Path(service_dir))
         return plaintext_path, encrypted_path
+
+    @staticmethod
+    def _encrypt_file_inprocess(
+        input_path: Path, output_path: Path, service_dir: Path, user_email: str = GALAXY_TEST_USER_EMAIL
+    ) -> None:
+        """Encrypt *input_path* in-process using the key material in *service_dir*."""
+        import crypt4gh.keys
+        import crypt4gh.lib
+        import nacl.public as nacl_pub
+
+        safe_name = user_email.replace("@", "_at_").replace(".", "_")
+        public_key_path = service_dir / f"user_{safe_name}.pub"
+        if not public_key_path.exists():
+            raise FileNotFoundError(
+                f"No public key for {user_email!r} at {public_key_path}. "
+                "Ensure CRYPT4GH_SERVICE_DIR points to the initialised service directory."
+            )
+
+        recipient_public_key = crypt4gh.keys.get_public_key(str(public_key_path))
+        ephemeral_sk = bytes(nacl_pub.PrivateKey.generate())
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(input_path, "rb") as infile, open(output_path, "wb") as outfile:
+            crypt4gh.lib.encrypt(
+                keys=[(0, ephemeral_sk, recipient_public_key)],
+                infile=infile,
+                outfile=outfile,
+            )
 
     def _upload_encrypted_dataset(self, history_id: str, test_data_filename: str) -> tuple[str, Path]:
         """Upload an encrypted test-data file and return (dataset_id, encrypted_path)."""
