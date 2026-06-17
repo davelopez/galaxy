@@ -13,6 +13,7 @@ from galaxy.model.unittest_utils.data_app import (
 )
 from galaxy.security.vault import (
     _unwrap_vault,
+    DatabaseVault,
     HashicorpVault,
     InvalidVaultConfigException,
     InvalidVaultKeyException,
@@ -128,6 +129,33 @@ class TestDatabaseVault(AbstractTestCases.VaultTestBase):
         vault = VaultFactory.from_app(app)
         with self.assertRaises(InvalidToken):
             vault.read_secret("my/incorrect/secret")
+
+    def test_legacy_key_migration(self):
+        # Simulate a secret stored with a leading slash (pre-26.1 format)
+        config = GalaxyDataTestConfig(vault_config_file=VAULT_CONF_DATABASE)
+        app = GalaxyDataTestApp(config=config)
+        vault = VaultFactory.from_app(app)
+
+        # The vault chain is VaultKeyValidationWrapper(VaultKeyPrefixWrapper(DatabaseVault))
+        # The prefix is 'my_galaxy_instance' (from vault_conf_database.yml with leading slash stripped)
+        # Pre-26.1, VaultKeyPrefixWrapper emitted /{prefix}/{key}, so the DB stored keys like
+        # /my_galaxy_instance/my/legacy/secret. Write that directly to simulate the legacy state.
+        inner = _unwrap_vault(vault)
+        assert isinstance(inner, DatabaseVault)
+        inner.write_secret("/my_galaxy_instance/my/legacy/secret", "legacy value")
+
+        # Read with the new canonical format through the full wrapper chain
+        # VaultKeyValidationWrapper normalizes → VaultKeyPrefixWrapper adds prefix →
+        # DatabaseVault.read_secret("my_galaxy_instance/my/legacy/secret") should migrate
+        assert vault.read_secret("my/legacy/secret") == "legacy value"
+
+        # Verify the secret is now accessible with the canonical key
+        assert vault.read_secret("my/legacy/secret") == "legacy value"
+
+        # Verify the legacy key no longer exists (was migrated to canonical form)
+        assert inner._get_vault_value("/my_galaxy_instance/my/legacy/secret") is None
+        # Verify the canonical key now exists
+        assert inner._get_vault_value("my_galaxy_instance/my/legacy/secret") is not None
 
 
 def _make_mocked_hashicorp_vault() -> HashicorpVault:

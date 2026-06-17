@@ -221,6 +221,20 @@ class DatabaseVault(Vault):
         if key_obj and key_obj.value:
             f = self._get_multi_fernet()
             return f.decrypt(key_obj.value.encode("utf-8")).decode("utf-8")
+        # Galaxy <= 26.0 emitted a leading slash in vault keys, which was stored
+        # in the database. PR #22530 normalized keys to not have leading slashes.
+        # Fall back to reading the legacy form and rewrite under the canonical
+        # key so the secret survives the Galaxy upgrade. This fallback can be
+        # removed after a deprecation window once operators have migrated.
+        legacy_key_obj = self._get_vault_value(f"/{key}")
+        if legacy_key_obj and legacy_key_obj.value:
+            log.warning("Migrating legacy non-canonical DatabaseVault secret to canonical path: %s", key)
+            f = self._get_multi_fernet()
+            value = f.decrypt(legacy_key_obj.value.encode("utf-8")).decode("utf-8")
+            self.write_secret(key, value)
+            self.sa_session.delete(legacy_key_obj)
+            self.sa_session.flush()
+            return value
         return None
 
     def write_secret(self, key: str, value: str) -> None:
