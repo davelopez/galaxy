@@ -1,9 +1,9 @@
 import base64
 import os
+from datetime import datetime
 from inspect import isclass
 from typing import (
     Any,
-    Optional,
 )
 
 from galaxy.datatypes.binary import Binary
@@ -26,7 +26,7 @@ class Crypt4GH(Binary):
     file_ext = CRYPT4GH_FILE_EXT
     display_behavior = "download"
     transparent_staging_enabled: bool = False
-    crypt4gh_inner_datatype: Optional[Any] = None
+    crypt4gh_inner_datatype: Any | None = None
 
     MetadataElement(
         name="crypt4gh_header",
@@ -37,6 +37,7 @@ class Crypt4GH(Binary):
         optional=False,
         no_value="",
     )
+
     MetadataElement(
         name="crypt4gh_inner_ext",
         default="data",
@@ -45,6 +46,28 @@ class Crypt4GH(Binary):
         visible=True,
         optional=True,
         no_value="data",
+    )
+
+    MetadataElement(
+        name="crypt4gh_compute_keypair_id",
+        default="",
+        desc="Unique identifier of the corresponding keypair at the compute node (retained for both analysis input and "
+        "output datasets).",
+        readonly=False,
+        visible=False,
+        optional=True,
+        no_value="",
+    )
+
+    MetadataElement(
+        name="crypt4gh_compute_keypair_expiration_date",
+        default="",
+        desc="Date and time of expiration of the corresponding keypair at the compute node, in ISO 8610 format "
+        "(retained for both analysis input and output datasets).",
+        readonly=False,
+        visible=False,
+        optional=True,
+        no_value="",
     )
 
     def sniff(self, filename: str) -> bool:
@@ -56,11 +79,24 @@ class Crypt4GH(Binary):
             return True
         return os.path.basename(filename).endswith(f".{self.file_ext}")
 
-    def set_meta(self, dataset: DatasetProtocol, overwrite: bool = True, **kwd) -> None:
+    def set_meta(
+        self,
+        dataset: DatasetProtocol,
+        overwrite: bool = True,
+        crypt4gh_compute_keypair_id: str | None = None,
+        crypt4gh_compute_keypair_expiration_date: datetime | None = None,
+        **kwd,
+    ) -> None:
         header = read_crypt4gh_header(dataset.get_file_name())
         if overwrite or not dataset.metadata.element_is_set("crypt4gh_header"):
             dataset.metadata.crypt4gh_header = base64.b64encode(header).decode("ascii")
         dataset.metadata.crypt4gh_inner_ext = self._infer_inner_ext(dataset)
+        if crypt4gh_compute_keypair_id is not None:
+            dataset.metadata.crypt4gh_compute_keypair_id = crypt4gh_compute_keypair_id
+        if crypt4gh_compute_keypair_expiration_date is not None:
+            dataset.metadata.crypt4gh_compute_keypair_expiration_date = (
+                crypt4gh_compute_keypair_expiration_date.isoformat()
+            )
 
     def set_peek(self, dataset: DatasetProtocol, **kwd) -> None:
         if not dataset.dataset.purged:
