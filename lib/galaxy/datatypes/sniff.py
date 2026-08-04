@@ -917,6 +917,7 @@ def handle_uploaded_dataset_file_internal(
     in_place: bool = False,
     check_content: bool = True,
     is_binary: bool | None = None,
+    uploaded_file_name: str | None = None,
     uploaded_file_ext: str | None = None,
     convert_to_posix_lines: bool | None = None,
     convert_spaces_to_tabs: bool | None = None,
@@ -944,7 +945,9 @@ def handle_uploaded_dataset_file_internal(
         if is_crypt4gh_upload:
             if ext in AUTO_DETECT_EXTENSIONS:
                 # User didn't select a type, infer inner type from filename
-                upload_name = f"x.{uploaded_file_ext}" if uploaded_file_ext else file_prefix.filename
+                upload_name = uploaded_file_name or (f"x.{uploaded_file_ext}" if uploaded_file_ext else None)
+                if not upload_name:
+                    upload_name = file_prefix.filename
                 guessed_ext = infer_crypt4gh_file_ext(
                     upload_name,
                     datatypes_registry,
