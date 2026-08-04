@@ -39,8 +39,8 @@ from galaxy.util.checkers import (
 )
 from galaxy.util.crypt4gh import (
     check_crypt4gh,
-    CRYPT4GH_SUFFIX,
     infer_crypt4gh_file_ext,
+    is_crypt4gh_file_ext,
     wrap_crypt4gh_file_ext,
 )
 from galaxy.util.path import StrPath
@@ -597,7 +597,7 @@ def guess_ext(fname_or_file_prefix: Union[str, "FilePrefix"], sniff_order, is_bi
 
 
 def guess_ext_from_file_name(fname, registry, requested_ext="auto"):
-    if fname.endswith(CRYPT4GH_SUFFIX):
+    if is_crypt4gh_file_ext(fname):
         return infer_crypt4gh_file_ext(fname, registry, requested_ext=requested_ext)
     if requested_ext != "auto":
         return requested_ext

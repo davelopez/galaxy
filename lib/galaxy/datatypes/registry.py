@@ -639,8 +639,7 @@ class Registry:
 
     def get_datatype_from_filename(self, name):
         generic_datatype_instance = self.get_datatype_by_extension("data")
-        if name.endswith(crypt4gh.CRYPT4GH_SUFFIX):
-            inner_name = name[: -len(crypt4gh.CRYPT4GH_SUFFIX)]
+        if (inner_name := crypt4gh.unwrap_crypt4gh_file_ext(name)) is not None:
             if "." not in inner_name:
                 return self.get_datatype_by_extension(crypt4gh.CRYPT4GH_FILE_EXT) or generic_datatype_instance
             inner_datatype = self.get_datatype_from_filename(inner_name)

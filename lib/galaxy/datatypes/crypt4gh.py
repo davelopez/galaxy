@@ -77,7 +77,12 @@ class Crypt4GH(Binary):
             # Generic wrapper can identify crypt4gh by header only, which allows
             # re-detection on object-store paths without original filename suffixes.
             return True
-        return os.path.basename(filename).endswith(f".{self.file_ext}")
+        basename = os.path.basename(filename)
+        unwrapped_name = unwrap_crypt4gh_file_ext(basename)
+        if unwrapped_name is None:
+            return False
+        inner_ext = unwrap_crypt4gh_file_ext(self.file_ext)
+        return inner_ext is not None and unwrapped_name.endswith(f".{inner_ext}")
 
     def set_meta(
         self,
@@ -126,8 +131,8 @@ class Crypt4GH(Binary):
         if dataset_ext is not None:
             return dataset_ext
         created_from_basename = getattr(dataset.dataset, "created_from_basename", None)
-        if created_from_basename and created_from_basename.endswith(CRYPT4GH_SUFFIX):
-            return created_from_basename[: -len(CRYPT4GH_SUFFIX)].rsplit(".", 1)[-1]
+        if created_from_basename and (unwrapped_name := unwrap_crypt4gh_file_ext(created_from_basename)) is not None:
+            return unwrapped_name.rsplit(".", 1)[-1]
         return "data"
 
 

@@ -1,17 +1,32 @@
 import struct
+from re import fullmatch
 from typing import (
     IO,
-    Optional,
 )
 
 CRYPT4GH_MAGIC = b"crypt4gh"
 CRYPT4GH_VERSION = 1
-CRYPT4GH_FILE_EXT = "crypt4gh"
+CRYPT4GH_FILE_EXT = "c4gh"
 CRYPT4GH_SUFFIX = f".{CRYPT4GH_FILE_EXT}"
 
 
+def _is_generic_crypt4gh_file_ext(file_ext: str) -> bool:
+    return fullmatch(r"c[^.]*4gh", file_ext) is not None
+
+
+def _unwrap_crypt4gh_suffix(value: str) -> str | None:
+    if not value:
+        return None
+    stem, sep, suffix = value.rpartition(".")
+    if not sep:
+        return None
+    if _is_generic_crypt4gh_file_ext(suffix):
+        return stem
+    return None
+
+
 def is_crypt4gh_file_ext(file_ext: str) -> bool:
-    return file_ext == CRYPT4GH_FILE_EXT or file_ext.endswith(CRYPT4GH_SUFFIX)
+    return _is_generic_crypt4gh_file_ext(file_ext) or _unwrap_crypt4gh_suffix(file_ext) is not None
 
 
 def wrap_crypt4gh_file_ext(file_ext: str) -> str:
@@ -20,18 +35,14 @@ def wrap_crypt4gh_file_ext(file_ext: str) -> str:
     return f"{file_ext}{CRYPT4GH_SUFFIX}"
 
 
-def unwrap_crypt4gh_file_ext(file_ext: str) -> Optional[str]:
-    if file_ext == CRYPT4GH_FILE_EXT:
+def unwrap_crypt4gh_file_ext(file_ext: str) -> str | None:
+    if _is_generic_crypt4gh_file_ext(file_ext):
         return None
-    if file_ext.endswith(CRYPT4GH_SUFFIX):
-        return file_ext[: -len(CRYPT4GH_SUFFIX)]
-    return None
+    return _unwrap_crypt4gh_suffix(file_ext)
 
 
-def infer_crypt4gh_inner_file_ext(filename: str, registry) -> Optional[str]:
-    if not filename.endswith(CRYPT4GH_SUFFIX):
-        return None
-    inner_filename = filename[: -len(CRYPT4GH_SUFFIX)]
+def infer_crypt4gh_inner_file_ext(filename: str, registry) -> str | None:
+    inner_filename = _unwrap_crypt4gh_suffix(filename) or filename
     datatype = registry.get_datatype_from_filename(inner_filename)
     if datatype and datatype.file_ext not in ("data", "binary", "txt", "auto"):
         return datatype.file_ext
@@ -49,23 +60,33 @@ def infer_crypt4gh_file_ext(filename: str, registry, requested_ext: str = "auto"
 
 def preserve_crypt4gh_inner_file_ext(
     guessed_ext: str,
-    current_ext: Optional[str] = None,
-    metadata_inner_ext: Optional[str] = None,
+    current_ext: str | None = None,
+    metadata_inner_ext: str | None = None,
 ) -> str:
     """Preserve a known crypt4gh wrapper extension during datatype re-detection.
 
     Re-detection from object-store paths often loses the original filename suffix
-    and can only sniff the generic ``crypt4gh`` wrapper. When that happens, keep
+    and can only sniff a generic ``c*4gh`` wrapper. When that happens, keep
     the more specific wrapper if we already know it from the dataset extension or
     from computed ``crypt4gh_inner_ext`` metadata.
     """
-    if guessed_ext != CRYPT4GH_FILE_EXT:
+    if not _is_generic_crypt4gh_file_ext(guessed_ext):
         return guessed_ext
 
-    if current_ext and current_ext != CRYPT4GH_FILE_EXT and is_crypt4gh_file_ext(current_ext):
+    if current_ext and not _is_generic_crypt4gh_file_ext(current_ext) and is_crypt4gh_file_ext(current_ext):
         return current_ext
 
-    if metadata_inner_ext and metadata_inner_ext not in ("auto", "data", "binary", "txt", CRYPT4GH_FILE_EXT):
+    if (
+        metadata_inner_ext
+        and metadata_inner_ext
+        not in (
+            "auto",
+            "data",
+            "binary",
+            "txt",
+        )
+        and not _is_generic_crypt4gh_file_ext(metadata_inner_ext)
+    ):
         return wrap_crypt4gh_file_ext(metadata_inner_ext)
 
     return guessed_ext
