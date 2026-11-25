@@ -495,6 +495,23 @@ def test_cleanup_keeps_outputs_linked_to_inputs(tmp_path, service, user):
     assert (outputs / "unrelated.dat").is_symlink()
 
 
+def test_cleanup_removes_links_to_metadata_files_the_job_did_not_create(tmp_path, service, user):
+    key_ref = service.get_compute_key_info(user.public)
+    plan = _plan(tmp_path, service, key_ref, [_protected_input(tmp_path, service, user, key_ref)])
+    plan_path = str(tmp_path / "plan.json")
+    plan.write(plan_path)
+    assert run("stage-in", plan_path) == 0
+    working = tmp_path / "job" / "working"
+    working.mkdir()
+    # Tools get a path for every metadata file of the format, the datatype may not create all of them.
+    (working / "input.bam.csi").symlink_to(os.path.join(os.path.dirname(plan.inputs[0].primary.staged_path), "missing"))
+
+    assert run("cleanup-inputs", plan_path) == 0
+
+    assert not os.path.lexists(working / "input.bam.csi")
+    assert not os.path.exists(os.path.join(plan.job_directory, CLEANUP_FAILURE_FILE))
+
+
 def _staged_runtime(tmp_path, service, user):
     key_ref = service.get_compute_key_info(user.public)
     plan = _plan(tmp_path, service, key_ref, [_protected_input(tmp_path, service, user, key_ref)])

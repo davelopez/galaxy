@@ -473,6 +473,9 @@ class Crypt4GHJobRuntime:
                 if os.path.commonpath([target, inputs_directory]) != inputs_directory:
                     continue
                 os.remove(path)
+                if not os.path.exists(target):
+                    # E.g. a metadata file of the format that the job didn't create: nothing to keep.
+                    continue
                 if os.path.isdir(target):
                     shutil.copytree(target, path)
                 else:
