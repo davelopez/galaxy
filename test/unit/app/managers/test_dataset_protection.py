@@ -155,6 +155,9 @@ class _FakeOutput:
     def metadata_file_types(self):
         return metadata_file_names(self.datatype)
 
+    def extra_files_path_exists(self):
+        return self.dataset.extra_files_path_exists()
+
 
 def _manager(walltime=None):
     manager = DatasetProtectionManager(
@@ -162,6 +165,26 @@ def _manager(walltime=None):
     )
     manager.get_grant = mock.MagicMock(return_value=None)  # type: ignore[method-assign]
     return manager
+
+
+@pytest.mark.parametrize("ext,inner_ext", [("fastqsanger.c4gh", "fastqsanger"), ("c4gh", "data")])
+def test_decrypted_inputs_have_the_datatype_of_their_plaintext(tmp_path, ext, inner_ext):
+    encrypted_input, _ = _protected_output(tmp_path)
+    encrypted_input.extension = ext
+    grant = DatasetProtectionGrant(
+        key_ref="cnk:1",
+        expires_at=(datetime.now(timezone.utc) + timedelta(days=3)).replace(tzinfo=None),
+        grant_data={"compute_header": "compute"},
+    )
+    compute_environment = Bunch(input_path_rewrite=lambda dataset: dataset.dataset.path)
+
+    protected_input = _manager()._protected_input(
+        cast(DatasetInstance, encrypted_input), grant, cast(ComputeEnvironment, compute_environment), str(tmp_path)
+    )
+
+    # Tools see it as the inner datatype ($input.ext), the generic wrapper gives no inner format.
+    assert protected_input.ext == inner_ext
+    assert protected_input.primary.staged_path == str(tmp_path / "1" / f"plaintext.{inner_ext}")
 
 
 def _job(*outputs):

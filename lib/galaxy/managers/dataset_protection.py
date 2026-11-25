@@ -642,7 +642,7 @@ class DatasetProtectionManager:
         dataset = dataset_instance.dataset
         assert dataset
         staged_directory = os.path.join(inputs_directory, str(dataset.id))
-        inner_ext = unwrap_crypt4gh_file_ext(dataset_instance.extension) or "dat"
+        inner_ext = unwrap_crypt4gh_file_ext(dataset_instance.extension) or "data"
         staged_extra_files_path = os.path.join(staged_directory, "plaintext_files")
         source_extra_files_path = None
         extra_files: dict[str, ProtectedFile] = {}
