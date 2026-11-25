@@ -1,0 +1,24 @@
+<!-- Test tool for Crypt4GH support: stages a list of BAMs with their indexes from `serialize()`, as tools
+     staging collections do, and reports the name, format and first bytes of every file the tool reads. -->
+<tool id="crypt4gh_bam_collection_staging" name="crypt4gh_bam_collection_staging" version="1.0.0" profile="24.0">
+    <description>stages a list of BAMs with their indexes</description>
+    <command><![CDATA[
+#for $element in $input1.serialize():
+ln -s '${element["source_path"]}' '${element["staging_path"]}' &&
+echo '${element["staging_path"]} ${element["ext"]}' >> '$output' &&
+#for $metadata_file in $element["metadata_files"]:
+ln -s '${metadata_file["source_path"]}' '${metadata_file["staging_path"]}' &&
+#end for
+#end for
+#for $path in $input1.all_paths:
+echo "all_paths \$(head -c 4 '$path' | od -An -tx1 | tr -d ' \n')" >> '$output' &&
+#end for
+for staged in *.bam *.bai; do echo "\$staged \$(head -c 4 "\$staged" | od -An -tx1 | tr -d ' \n')"; done >> '$output'
+    ]]></command>
+    <inputs>
+        <param name="input1" type="data_collection" collection_type="list" format="bam"/>
+    </inputs>
+    <outputs>
+        <data name="output" format="txt"/>
+    </outputs>
+</tool>

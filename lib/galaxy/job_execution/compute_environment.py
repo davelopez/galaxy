@@ -61,6 +61,10 @@ class ComputeEnvironment(metaclass=ABCMeta):
         """The extension the tool sees for an input (``$input.ext``), ``None`` to keep the dataset's own."""
         return None
 
+    def input_metadata_files_rewrite(self, dataset) -> list[tuple[str, str]] | None:
+        """``(file extension, path)`` of the metadata files the tool reads for an input, ``None`` to keep the stored ones."""
+        return None
+
     @abstractmethod
     def unstructured_path_rewrite(self, path):
         """Rewrite loc file paths, etc.."""
@@ -255,6 +259,18 @@ class ProtectedInputsComputeEnvironment(ComputeEnvironment):
         dataset_id = getattr(dataset.dataset, "id", None)
         protected_input = self.plan.staged_input(dataset_id) if isinstance(dataset_id, int) else None
         return protected_input.ext if protected_input else self.base.input_extension_rewrite(dataset)
+
+    def input_metadata_files_rewrite(self, dataset):
+        dataset_id = getattr(dataset.dataset, "id", None)
+        protected_input = self.plan.staged_input(dataset_id) if isinstance(dataset_id, int) else None
+        if protected_input is None:
+            return self.base.input_metadata_files_rewrite(dataset)
+        # Decrypted or created by the job, also when the input is stored without them (e.g. a BAM index).
+        return [
+            (dataset.metadata.spec[name].file_ext, path)
+            for name in dataset.metadata_file_types
+            if (path := protected_input.staged_metadata_file(name))
+        ]
 
     def unstructured_path_rewrite(self, path):
         return self.base.unstructured_path_rewrite(path)

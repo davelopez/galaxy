@@ -33,6 +33,7 @@ PLAINTEXT_1 = b"@read1\nACGT\n+\nIIII\n"
 PLAINTEXT_2 = b"@read2\nTTTT\n+\nIIII\n"
 SORTED_BAM = os.path.join(galaxy_directory(), "test-data", "1.bam")
 BAI_MAGIC = b"BAI\x01"
+BGZF_MAGIC = b"\x1f\x8b\x08\x04"
 
 
 class BaseCrypt4GHExecutionIntegrationTestCase(integration_util.IntegrationTestCase):
@@ -135,12 +136,7 @@ class BaseCrypt4GHExecutionIntegrationTestCase(integration_util.IntegrationTestC
 
     def _map_cat_over_list(self, history_id: str, *datasets: dict) -> list[tuple[dict, dict]]:
         """Run cat on each element of a list of ``datasets``, return each job with its output."""
-        identifiers = [{"name": f"element{i}", "src": "hda", "id": d["id"]} for i, d in enumerate(datasets)]
-        hdca = (
-            DatasetCollectionPopulator(self.galaxy_interactor)
-            .create_list_in_history(history_id, direct_upload=False, element_identifiers=identifiers)
-            .json()
-        )
+        hdca = self._create_list(history_id, *datasets)
         response = self.dataset_populator.run_tool_raw(
             "cat", {"input1": {"batch": True, "values": [{"src": "hdca", "id": hdca["id"]}]}}, history_id
         )
@@ -154,6 +150,14 @@ class BaseCrypt4GHExecutionIntegrationTestCase(integration_util.IntegrationTestC
             )
             results.append((job, output))
         return results
+
+    def _create_list(self, history_id: str, *datasets: dict) -> dict:
+        identifiers = [{"name": f"element{i}", "src": "hda", "id": d["id"]} for i, d in enumerate(datasets)]
+        return (
+            DatasetCollectionPopulator(self.galaxy_interactor)
+            .create_list_in_history(history_id, direct_upload=False, element_identifiers=identifiers)
+            .json()
+        )
 
     def _run_explicit_conversion(self, history_id: str, input1: dict):
         return self.dataset_populator.run_tool_raw(
@@ -357,6 +361,33 @@ class TestCrypt4GHExecutionIntegration(BaseCrypt4GHExecutionIntegrationTestCase)
         assert sorted(outputs) == ["error", "ok"], results
         assert outputs["error"]["purged"], outputs["error"]
         assert self._decrypted_content(history_id, outputs["ok"]) in (PLAINTEXT_1, PLAINTEXT_2)
+
+    def test_tools_staging_collections_read_decrypted_elements_and_indexes(self, history_id):
+        with open(SORTED_BAM, "rb") as f:
+            bam = f.read()
+        uploaded = [self._upload_authorized(history_id, bam, name=f"reads{i}.bam.c4gh") for i in range(2)]
+        # Uploaded encrypted, the first BAM has no index; the output of a job keeps an encrypted one.
+        job, outputs = self._run_bam_index(history_id, uploaded[1])
+        assert job["state"] == "ok", job
+        hdca = self._create_list(history_id, uploaded[0], outputs["output"])
+
+        response = self.dataset_populator.run_tool_raw(
+            "crypt4gh_bam_collection_staging", {"input1": {"src": "hdca", "id": hdca["id"]}}, history_id
+        )
+        job, output = self._wait_for_job(history_id, response)
+
+        assert job["state"] == "ok", job
+        bgzf, bai = BGZF_MAGIC.hex(), BAI_MAGIC.hex()
+        assert self._decrypted_content(history_id, output).decode().splitlines() == [
+            "element0.bam bam",
+            "element1.bam bam",
+            f"all_paths {bgzf}",
+            f"all_paths {bgzf}",
+            f"element0.bam {bgzf}",
+            f"element1.bam {bgzf}",
+            f"element0.bam.bai {bai}",
+            f"element1.bam.bai {bai}",
+        ]
 
     def test_tools_writing_unnamed_outputs_are_refused(self, history_id):
         dataset = self._upload_authorized(history_id, PLAINTEXT_1)
