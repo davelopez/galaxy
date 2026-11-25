@@ -62,7 +62,10 @@ class ComputeEnvironment(metaclass=ABCMeta):
         return None
 
     def input_metadata_files_rewrite(self, dataset) -> list[tuple[str, str]] | None:
-        """``(file extension, path)`` of the metadata files the tool reads for an input, ``None`` to keep the stored ones."""
+        """``(file extension, path)`` of the metadata files the tool reads for an input.
+
+        ``None`` to keep the stored ones.
+        """
         return None
 
     @abstractmethod

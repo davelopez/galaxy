@@ -387,6 +387,8 @@ class TestCrypt4GHExecutionIntegration(BaseCrypt4GHExecutionIntegrationTestCase)
             f"element1.bam {bgzf}",
             f"element0.bam.bai {bai}",
             f"element1.bam.bai {bai}",
+            # Created by the job when the BAM needs one, the tool can't tell which index it gets.
+            "element0.bam.bam.csi missing",
         ]
 
     def test_tools_writing_unnamed_outputs_are_refused(self, history_id):

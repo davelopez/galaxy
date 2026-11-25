@@ -813,7 +813,10 @@ class DatasetCollectionWrapper(ToolParameterValueWrapper, HasDatasets):
     def element_identifiers_extensions_paths_and_metadata_files(
         self,
     ) -> list[list[Any]]:
-        """Identifiers, extension, path and metadata files of each dataset as the tool reads it, nested collections flattened."""
+        """Identifiers, extension, path and metadata files of each dataset as the tool reads it.
+
+        Nested collections are flattened.
+        """
         if self._element_identifiers_extensions_paths_and_metadata_files is None:
             self._element_identifiers_extensions_paths_and_metadata_files = [
                 [identifiers, element.input_extension, str(element), element.all_metadata_files]

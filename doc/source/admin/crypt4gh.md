@@ -419,7 +419,8 @@ Limitations:
   never exists (Galaxy stores CSI indexes as `bam_index` too), and `bam_index`
   doesn't exist when the BAM can't be indexed (e.g. it isn't sorted). Tools
   checking whether such a file is set, to create it themselves otherwise, fail
-  instead.
+  instead. Collections list them too (`serialize()`, `all_metadata_files`), so
+  tools staging a collection get links to metadata files that don't exist.
 - Composite datasets uploaded by users can't be decrypted: the user service only
   authorizes the primary file. Composite outputs of protected jobs are supported,
   but their extra files are authorized by the job that wrote them: further jobs

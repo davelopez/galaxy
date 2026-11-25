@@ -13,7 +13,9 @@ ln -s '${metadata_file["source_path"]}' '${metadata_file["staging_path"]}' &&
 #for $path in $input1.all_paths:
 echo "all_paths \$(head -c 4 '$path' | od -An -tx1 | tr -d ' \n')" >> '$output' &&
 #end for
-for staged in *.bam *.bai; do echo "\$staged \$(head -c 4 "\$staged" | od -An -tx1 | tr -d ' \n')"; done >> '$output'
+for staged in *.bam *.bai *.csi; do
+    if [ -e "\$staged" ]; then echo "\$staged \$(head -c 4 "\$staged" | od -An -tx1 | tr -d ' \n')"; else echo "\$staged missing"; fi;
+done >> '$output'
     ]]></command>
     <inputs>
         <param name="input1" type="data_collection" collection_type="list" format="bam"/>
