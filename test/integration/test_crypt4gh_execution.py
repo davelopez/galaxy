@@ -23,6 +23,7 @@ from galaxy_test.base.crypt4gh import (
     MockRecryptorService,
 )
 from galaxy_test.base.populators import (
+    DatasetCollectionPopulator,
     DatasetPopulator,
     WorkflowPopulator,
 )
@@ -131,6 +132,28 @@ class BaseCrypt4GHExecutionIntegrationTestCase(integration_util.IntegrationTestC
         for i, other in enumerate(others):
             inputs[f"queries_{i}|input2"] = {"src": "hda", "id": other["id"]}
         return self.dataset_populator.run_tool_raw("cat", inputs, history_id)
+
+    def _map_cat_over_list(self, history_id: str, *datasets: dict) -> list[tuple[dict, dict]]:
+        """Run cat on each element of a list of ``datasets``, return each job with its output."""
+        identifiers = [{"name": f"element{i}", "src": "hda", "id": d["id"]} for i, d in enumerate(datasets)]
+        hdca = (
+            DatasetCollectionPopulator(self.galaxy_interactor)
+            .create_list_in_history(history_id, direct_upload=False, element_identifiers=identifiers)
+            .json()
+        )
+        response = self.dataset_populator.run_tool_raw(
+            "cat", {"input1": {"batch": True, "values": [{"src": "hdca", "id": hdca["id"]}]}}, history_id
+        )
+        self._assert_status_code_is(response, 200)
+        results = []
+        for job_summary in response.json()["jobs"]:
+            self.dataset_populator.wait_for_job(job_summary["id"], assert_ok=False)
+            job = self.dataset_populator.get_job_details(job_summary["id"], full=True).json()
+            output = self.dataset_populator.get_history_dataset_details(
+                history_id=history_id, content_id=job["outputs"]["out_file1"]["id"], assert_ok=False
+            )
+            results.append((job, output))
+        return results
 
     def _run_explicit_conversion(self, history_id: str, input1: dict):
         return self.dataset_populator.run_tool_raw(
@@ -312,6 +335,28 @@ class TestCrypt4GHExecutionIntegration(BaseCrypt4GHExecutionIntegrationTestCase)
 
     def test_tools_read_the_indexes_of_decrypted_bam_inputs(self, history_id):
         self._check_tools_read_bam_indexes(history_id)
+
+    def test_jobs_mapped_over_a_list_encrypt_every_element(self, history_id):
+        datasets = [self._upload_authorized(history_id, plaintext) for plaintext in (PLAINTEXT_1, PLAINTEXT_2)]
+
+        results = self._map_cat_over_list(history_id, *datasets)
+
+        assert [job["state"] for job, _ in results] == ["ok", "ok"], results
+        assert sorted(self._decrypted_content(history_id, output) for _, output in results) == sorted(
+            [PLAINTEXT_1, PLAINTEXT_2]
+        )
+
+    def test_failing_to_encrypt_an_element_keeps_the_other_elements(self, history_id):
+        datasets = [self._upload_authorized(history_id, plaintext) for plaintext in (PLAINTEXT_1, PLAINTEXT_2)]
+        # Whichever job encrypts its output first fails.
+        self.service.failures["recrypt_header_to_user_key"] = [422]
+
+        results = self._map_cat_over_list(history_id, *datasets)
+
+        outputs = {job["state"]: output for job, output in results}
+        assert sorted(outputs) == ["error", "ok"], results
+        assert outputs["error"]["purged"], outputs["error"]
+        assert self._decrypted_content(history_id, outputs["ok"]) in (PLAINTEXT_1, PLAINTEXT_2)
 
     def test_tools_writing_unnamed_outputs_are_refused(self, history_id):
         dataset = self._upload_authorized(history_id, PLAINTEXT_1)

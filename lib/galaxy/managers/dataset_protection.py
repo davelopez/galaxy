@@ -199,7 +199,10 @@ def _job_outputs(job: Job) -> list[DatasetInstance]:
     for collection in collections:
         if collection is not None:
             for dataset_instance in collection.dataset_instances:
-                outputs[(type(dataset_instance), dataset_instance.id)] = dataset_instance
+                # Jobs mapped over a collection share its implicit output collections, skip the other jobs' elements.
+                creating_job_id = dataset_instance.dataset.job_id
+                if creating_job_id is None or creating_job_id == job.id:
+                    outputs[(type(dataset_instance), dataset_instance.id)] = dataset_instance
     return list(outputs.values())
 
 
