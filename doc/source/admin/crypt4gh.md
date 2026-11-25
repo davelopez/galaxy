@@ -401,8 +401,10 @@ Limitations:
 - Outputs of jobs decrypting data aren't validated, for example by the workflow
   action validating outputs: validation reads the decrypted data, and its errors
   may quote it. Their validation state stays unknown.
-- Tools see the wrapper datatype in `$input.ext` (for example
-  `fastqsanger.c4gh`). The decrypted file name carries the inner extension.
+- Tools see the inner format of decrypted inputs in `$input.ext` and
+  `$input.file_ext` (for example `fastqsanger` for a `fastqsanger.c4gh` dataset),
+  and the decrypted file name carries it too. Inputs passed encrypted keep the
+  wrapper datatype.
 - Encrypted datasets only have metadata about their encryption, and the metadata
   files of their format, such as BAM indexes (`$input.metadata.bam_index`),
   encrypted. Other metadata derived from their content is never stored: tools

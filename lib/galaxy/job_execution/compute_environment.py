@@ -57,6 +57,10 @@ class ComputeEnvironment(metaclass=ABCMeta):
         """Where the tool reads the metadata file ``name`` of an input, ``None`` to keep ``metadata_value``."""
         return self.input_metadata_rewrite(dataset, metadata_value)
 
+    def input_extension_rewrite(self, dataset) -> str | None:
+        """The extension the tool sees for an input (``$input.ext``), ``None`` to keep the dataset's own."""
+        return None
+
     @abstractmethod
     def unstructured_path_rewrite(self, path):
         """Rewrite loc file paths, etc.."""
@@ -245,6 +249,12 @@ class ProtectedInputsComputeEnvironment(ComputeEnvironment):
             return self.base.input_metadata_file_rewrite(dataset, name, metadata_value)
         # The stored metadata files of decrypted inputs are encrypted, the tool reads the decrypted ones.
         return protected_input.staged_metadata_file(name) or str(dataset.metadata.spec[name].no_value)
+
+    def input_extension_rewrite(self, dataset):
+        # Tools read decrypted inputs in their inner format, e.g. `bam` for a `bam.c4gh` dataset.
+        dataset_id = getattr(dataset.dataset, "id", None)
+        protected_input = self.plan.staged_input(dataset_id) if isinstance(dataset_id, int) else None
+        return protected_input.ext if protected_input else self.base.input_extension_rewrite(dataset)
 
     def unstructured_path_rewrite(self, path):
         return self.base.unstructured_path_rewrite(path)

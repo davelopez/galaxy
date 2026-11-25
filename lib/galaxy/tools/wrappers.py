@@ -452,6 +452,9 @@ class DatasetFilenameWrapper(ToolParameterValueWrapper):
 
     @property
     def file_ext(self) -> str:
+        if extension := self._extension_rewrite():
+            datatype = self.datatypes_registry and self.datatypes_registry.get_datatype_by_extension(extension)
+            return str(getattr(datatype, "file_ext_export_alias", extension))
         return str(
             getattr(
                 self.unsanitized.datatype,
@@ -564,8 +567,15 @@ class DatasetFilenameWrapper(ToolParameterValueWrapper):
             return getattr(self.dataset, key)
         elif key == "serialize":
             return self.serialize
+        elif key in ("ext", "extension") and (extension := self._extension_rewrite()):
+            return extension
         else:
             return getattr(self.dataset, key)
+
+    def _extension_rewrite(self) -> str | None:
+        if self.__io_type != "input" or not self.compute_environment or not self:
+            return None
+        return self.compute_environment.input_extension_rewrite(self.unsanitized)
 
     def __bool__(self) -> bool:
         return bool(self.dataset)

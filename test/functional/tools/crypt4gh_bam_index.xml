@@ -1,9 +1,14 @@
-<!-- Test tool for Crypt4GH support: reads the index of a BAM input without checking it is set, as many tools do. -->
+<!-- Test tool for Crypt4GH support: reads the index of a BAM input without checking it is set, and only
+     links its input when `$input1.ext` names the format, as many tools do (e.g. freebayes). -->
 <tool id="crypt4gh_bam_index" name="crypt4gh_bam_index" version="1.0.0" profile="24.0">
     <description>copies a BAM and its index</description>
     <command><![CDATA[
-cp '${input1.metadata.bam_index}' '$index' &&
-cp '$input1' '$output'
+#if $input1.ext == 'bam':
+    ln -s '$input1' 'input.${input1.file_ext}' &&
+    ln -s '${input1.metadata.bam_index}' 'input.${input1.file_ext}.bai' &&
+#end if
+cp input.bam.bai '$index' &&
+cp input.bam '$output'
     ]]></command>
     <inputs>
         <param name="input1" type="data" format="bam" label="BAM"/>
